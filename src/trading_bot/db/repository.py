@@ -515,6 +515,7 @@ class Repository:
 
     async def get_agent_decisions(
         self, agent_type: str | None = None, limit: int = 50, symbol: str | None = None,
+        outcome: str | None = None,
     ) -> list[dict]:
         query = "SELECT * FROM agent_decisions WHERE 1=1"
         params: list = []
@@ -524,8 +525,122 @@ class Repository:
         if symbol:
             query += " AND symbol = ?"
             params.append(symbol)
+        if outcome:
+            query += " AND outcome = ?"
+            params.append(outcome)
         query += " ORDER BY created_at DESC LIMIT ?"
         params.append(limit)
         cursor = await self._db.db.execute(query, params)
         rows = await cursor.fetchall()
         return [dict(r) for r in rows]
+
+    async def get_agent_decision_by_id(self, decision_id: int) -> dict | None:
+        cursor = await self._db.db.execute(
+            "SELECT * FROM agent_decisions WHERE id = ?", (decision_id,)
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+    async def update_agent_decision_outcome(
+        self, decision_id: int, outcome: str, trade_id: int | None = None,
+    ) -> None:
+        if trade_id is not None:
+            await self._db.db.execute(
+                "UPDATE agent_decisions SET outcome = ?, trade_id = ? WHERE id = ?",
+                (outcome, trade_id, decision_id),
+            )
+        else:
+            await self._db.db.execute(
+                "UPDATE agent_decisions SET outcome = ? WHERE id = ?",
+                (outcome, decision_id),
+            )
+        await self._db.db.commit()
+
+    async def expire_old_proposals(self, agent_type: str, hours: int = 24) -> int:
+        cursor = await self._db.db.execute(
+            """UPDATE agent_decisions
+               SET outcome = 'expired'
+               WHERE agent_type = ? AND outcome = 'pending_approval'
+               AND created_at < datetime('now', ?)""",
+            (agent_type, f"-{hours} hours"),
+        )
+        await self._db.db.commit()
+        return cursor.rowcount
+
+    # --- Portfolio Drawdown Tracking ---
+
+    async def insert_portfolio_drawdown(
+        self,
+        platform: str,
+        equity: float,
+        high_watermark: float,
+        drawdown_pct: float,
+    ) -> int:
+        cursor = await self._db.db.execute(
+            """INSERT INTO portfolio_drawdown (platform, equity, high_watermark, drawdown_pct)
+               VALUES (?, ?, ?, ?)""",
+            (platform, equity, high_watermark, drawdown_pct),
+        )
+        await self._db.db.commit()
+        return cursor.lastrowid  # type: ignore[return-value]
+
+    async def get_portfolio_drawdown(
+        self, platform: str = "alpaca", limit: int = 100
+    ) -> list[dict]:
+        cursor = await self._db.db.execute(
+            """SELECT * FROM portfolio_drawdown
+               WHERE platform = ?
+               ORDER BY created_at DESC LIMIT ?""",
+            (platform, limit),
+        )
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+
+    async def get_high_watermark(self, platform: str = "alpaca") -> float:
+        """Get the most recent high watermark for a platform."""
+        cursor = await self._db.db.execute(
+            """SELECT high_watermark FROM portfolio_drawdown
+               WHERE platform = ?
+               ORDER BY created_at DESC LIMIT 1""",
+            (platform,),
+        )
+        row = await cursor.fetchone()
+        return float(row["high_watermark"]) if row else 0.0
+
+    async def get_last_buy_date(
+        self, symbol: str, source_prefix: str = "monitor:drawdown"
+    ) -> datetime | None:
+        """Get the date of the most recent BUY trade for a symbol from a specific source."""
+        cursor = await self._db.db.execute(
+            """SELECT created_at FROM trades
+               WHERE symbol = ? AND side = 'buy' AND source LIKE ?
+               ORDER BY created_at DESC LIMIT 1""",
+            (symbol, f"{source_prefix}%"),
+        )
+        row = await cursor.fetchone()
+        if row:
+            return datetime.fromisoformat(row["created_at"])
+        return None
+
+    async def get_strategy_total_value(
+        self, source_prefix: str, symbols: list[str],
+    ) -> float:
+        """Get total market value of positions bought by a specific strategy.
+
+        This sums up the net bought quantity * current filled price for each symbol.
+        """
+        if not symbols:
+            return 0.0
+        placeholders = ",".join("?" * len(symbols))
+        cursor = await self._db.db.execute(
+            f"""SELECT symbol,
+                       SUM(CASE WHEN side = 'buy' THEN quantity ELSE -quantity END) as net_qty,
+                       MAX(filled_price) as last_price
+                FROM trades
+                WHERE source LIKE ? AND symbol IN ({placeholders})
+                GROUP BY symbol
+                HAVING net_qty > 0""",
+            [f"{source_prefix}%", *symbols],
+        )
+        rows = await cursor.fetchall()
+        return sum(dict(r)["net_qty"] * dict(r)["last_price"] for r in rows if dict(r)["last_price"])

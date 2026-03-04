@@ -9,10 +9,12 @@ from trading_bot.db.repository import Repository
 from trading_bot.monitors.base import BaseMonitor, EventBus
 from trading_bot.monitors.cross_market import CrossMarketMonitor
 from trading_bot.monitors.crypto_momentum import CryptoMomentumMonitor
+from trading_bot.monitors.drawdown_accumulation import DrawdownAccumulationMonitor
 from trading_bot.monitors.kalshi_prediction import KalshiPredictionMonitor
 from trading_bot.monitors.polymarket_arb import PolymarketArbMonitor
 from trading_bot.monitors.polymarket_probability import PolymarketProbabilityMonitor
 from trading_bot.monitors.research_agent import ResearchAgentMonitor
+from trading_bot.monitors.short_candidate import ShortCandidateMonitor
 from trading_bot.monitors.stock_watchlist import StockWatchlistMonitor
 from trading_bot.monitors.strategy_review import StrategyReviewMonitor
 from trading_bot.utils.logging import log
@@ -26,6 +28,8 @@ MONITOR_TYPES: dict[str, type[BaseMonitor]] = {
     "strategy_review": StrategyReviewMonitor,
     "kalshi_prediction": KalshiPredictionMonitor,
     "crypto_momentum": CryptoMomentumMonitor,
+    "short_candidate": ShortCandidateMonitor,
+    "drawdown_accumulation": DrawdownAccumulationMonitor,
 }
 
 

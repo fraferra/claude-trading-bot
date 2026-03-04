@@ -13,6 +13,8 @@ const MONITOR_TYPES = [
   { id: 'cross_market', label: 'Cross-Market', desc: 'Logical arbitrage between markets' },
   { id: 'kalshi_prediction', label: 'Kalshi Prediction', desc: 'Autonomous Kalshi prediction market trading' },
   { id: 'crypto_momentum', label: 'Crypto Momentum', desc: '15-min crypto momentum/mean-reversion strategy' },
+  { id: 'short_candidate', label: 'Short Candidate', desc: 'Scan for short selling candidates (human approval required)' },
+  { id: 'drawdown_accumulation', label: 'Drawdown Accumulation', desc: 'DCA into leveraged ETFs with aggressive drawdown buying' },
 ];
 
 export default function Monitors() {
