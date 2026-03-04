@@ -23,6 +23,7 @@ dependencies = [
     "aiosqlite>=0.20.0",
     "websockets>=13.0",
     "kalshi-python>=0.4.0",
+    "cryptography>=42.0.0",
 ]
 
 [project.optional-dependencies]
