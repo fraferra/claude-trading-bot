@@ -50,24 +50,20 @@ class KalshiBroker(BaseBroker):
 
     @staticmethod
     def _build_client(config: KalshiConfig):
-        import tempfile
         from kalshi_python import Configuration, KalshiClient
 
         host = _DEMO_HOST if config.demo else _PROD_HOST
         cfg = Configuration(host=host)
-        client = KalshiClient(configuration=cfg)
+
         if config.api_key_id and config.private_key:
             # Handle escaped newlines from env vars (e.g. literal \n → actual newlines)
             key_content = config.private_key.replace("\\n", "\n")
-            # kalshi-python expects a file path, so write key to temp file
-            tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".pem", delete=False)
-            tmp.write(key_content)
-            tmp.close()  # Close so kalshi-python can read it
-            log.info(f"Kalshi auth: key_id={config.api_key_id[:8]}..., key_file={tmp.name}")
-            client.set_kalshi_auth(
-                key_id=config.api_key_id,
-                private_key_path=tmp.name,
-            )
+            # SDK reads api_key_id + private_key_pem from Configuration in __init__
+            cfg.api_key_id = config.api_key_id
+            cfg.private_key_pem = key_content
+            log.info(f"Kalshi auth configured: key_id={config.api_key_id[:8]}...")
+
+        client = KalshiClient(configuration=cfg)
         return client
 
     # --- Price conversion helpers ---
@@ -109,7 +105,7 @@ class KalshiBroker(BaseBroker):
             None, partial(self._client._portfolio_api.get_positions, limit=200)
         )
         positions = []
-        market_positions = resp.market_positions if resp.market_positions else []
+        market_positions = resp.positions if resp.positions else []
         for p in market_positions:
             qty = p.position if p.position else 0
             if qty == 0:
@@ -155,16 +151,20 @@ class KalshiBroker(BaseBroker):
         )
 
         try:
+            from kalshi_python.models import CreateOrderRequest as KalshiOrderRequest
+            order_req = KalshiOrderRequest(
+                ticker=order.symbol,
+                side=kalshi_side,
+                action=kalshi_action,
+                count=count,
+                type="limit",
+                yes_price=limit_price_cents,
+            )
             resp = await loop.run_in_executor(
                 None,
                 partial(
                     self._client._portfolio_api.create_order,
-                    ticker=order.symbol,
-                    side=kalshi_side,
-                    action=kalshi_action,
-                    count=count,
-                    type="limit",
-                    yes_price=limit_price_cents,
+                    create_order_request=order_req,
                 ),
             )
             result_order = resp.order
@@ -262,7 +262,7 @@ class KalshiBroker(BaseBroker):
             events.append(KalshiEventData(
                 event_ticker=e.event_ticker or "",
                 title=e.title or "",
-                category=e.category or "",
+                category=getattr(e, "series_ticker", "") or "",
                 markets=markets,
             ))
         return events
