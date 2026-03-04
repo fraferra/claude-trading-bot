@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, Depends, Request
 
 from trading_bot.api.deps import get_repo
@@ -43,6 +45,28 @@ async def get_kalshi_portfolio(request: Request):
         return {"error": f"Kalshi API error: {str(e)}"}
 
 
+@router.get("/kalshi/orders")
+async def get_kalshi_orders(request: Request, status: str | None = None):
+    """Get Kalshi orders. Pass status=resting for open orders."""
+    broker = request.app.state.brokers.get("kalshi")
+    if not broker:
+        return {"error": "Kalshi broker not configured", "orders": []}
+    try:
+        orders = await broker.get_orders(status=status)
+        return {"orders": orders}
+    except Exception as e:
+        return {"error": f"Kalshi API error: {str(e)}", "orders": []}
+
+
+@router.get("/kalshi/trades")
+async def get_kalshi_trades(
+    limit: int = 50,
+    repo: Repository = Depends(get_repo),
+):
+    """Get Kalshi trades from local DB."""
+    return await repo.get_trades(limit=limit, platform="kalshi")
+
+
 @router.get("/kalshi/estimates")
 async def get_kalshi_estimates(
     ticker: str | None = None,
@@ -51,6 +75,18 @@ async def get_kalshi_estimates(
 ):
     """Get recent AI probability estimates from DB."""
     return await repo.get_kalshi_estimates(ticker=ticker, limit=limit)
+
+
+@router.get("/kalshi/decisions")
+async def get_kalshi_decisions(
+    limit: int = 50,
+    symbol: str | None = None,
+    repo: Repository = Depends(get_repo),
+):
+    """Get recent Kalshi agent decisions from the decision log."""
+    return await repo.get_agent_decisions(
+        agent_type="kalshi_prediction", limit=limit, symbol=symbol,
+    )
 
 
 @router.post("/kalshi/scan")
@@ -84,11 +120,31 @@ async def trigger_kalshi_scan(request: Request, repo: Repository = Depends(get_r
                 reasoning=est.reasoning[:500],
                 category=est.category,
             )
+            # Also log decision
+            await repo.insert_agent_decision(
+                agent_type="kalshi_prediction",
+                symbol=est.ticker,
+                action=est.suggested_side.value if est.suggested_side else "hold",
+                confidence=min(0.95, abs(est.edge_pct) * 2 + 0.5),
+                reasoning=est.reasoning,
+                signals_json=json.dumps({
+                    "market_price": est.market_price,
+                    "ai_probability": est.ai_probability,
+                    "edge_pct": est.edge_pct,
+                    "kelly_fraction": est.kelly_fraction,
+                    "category": est.category,
+                    "title": est.title,
+                }),
+                outcome="scan_result",
+            )
         except Exception:
             pass
 
     return {
         "markets_found": len(markets),
         "analyzed": len(estimates),
-        "estimates": [e.model_dump() for e in estimates],
+        "estimates": [
+            {**e.model_dump(), "reasoning": e.reasoning}
+            for e in estimates
+        ],
     }

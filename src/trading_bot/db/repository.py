@@ -41,7 +41,8 @@ class Repository:
         return cursor.lastrowid  # type: ignore[return-value]
 
     async def get_trades(
-        self, limit: int = 100, symbol: str | None = None, source: str | None = None
+        self, limit: int = 100, symbol: str | None = None, source: str | None = None,
+        platform: str | None = None,
     ) -> list[dict]:
         query = "SELECT * FROM trades WHERE 1=1"
         params: list = []
@@ -51,6 +52,9 @@ class Repository:
         if source:
             query += " AND source = ?"
             params.append(source)
+        if platform:
+            query += " AND platform = ?"
+            params.append(platform)
         query += " ORDER BY created_at DESC LIMIT ?"
         params.append(limit)
         cursor = await self._db.db.execute(query, params)
@@ -479,6 +483,46 @@ class Repository:
         params: list = []
         if symbol:
             query += " WHERE symbol = ?"
+            params.append(symbol)
+        query += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+        cursor = await self._db.db.execute(query, params)
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+
+    # --- Agent Decisions (unified decision log) ---
+
+    async def insert_agent_decision(
+        self,
+        agent_type: str,
+        symbol: str,
+        action: str,
+        confidence: float | None = None,
+        reasoning: str = "",
+        signals_json: str = "{}",
+        outcome: str = "executed",
+        trade_id: int | None = None,
+    ) -> int:
+        cursor = await self._db.db.execute(
+            """INSERT INTO agent_decisions (agent_type, symbol, action, confidence,
+               reasoning, signals_json, outcome, trade_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (agent_type, symbol, action, confidence, reasoning,
+             signals_json, outcome, trade_id),
+        )
+        await self._db.db.commit()
+        return cursor.lastrowid  # type: ignore[return-value]
+
+    async def get_agent_decisions(
+        self, agent_type: str | None = None, limit: int = 50, symbol: str | None = None,
+    ) -> list[dict]:
+        query = "SELECT * FROM agent_decisions WHERE 1=1"
+        params: list = []
+        if agent_type:
+            query += " AND agent_type = ?"
+            params.append(agent_type)
+        if symbol:
+            query += " AND symbol = ?"
             params.append(symbol)
         query += " ORDER BY created_at DESC LIMIT ?"
         params.append(limit)

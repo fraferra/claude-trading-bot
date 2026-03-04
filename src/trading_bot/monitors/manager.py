@@ -130,10 +130,21 @@ class MonitorManager:
         ]
 
     async def shutdown(self) -> None:
-        """Stop all monitors gracefully."""
+        """Stop all monitors gracefully.
+
+        Cancel asyncio tasks but preserve DB status as "running"
+        so monitors auto-restart on next server startup.
+        """
         for monitor in list(self._monitors.values()):
             try:
-                await monitor.stop()
+                if monitor._task:
+                    monitor._task.cancel()
+                    try:
+                        await monitor._task
+                    except asyncio.CancelledError:
+                        pass
+                    monitor._task = None
+                log.info(f"Monitor {monitor.monitor_id} shut down (will auto-restart)")
             except Exception as e:
                 log.warning(f"Error stopping monitor {monitor.monitor_id}: {e}")
         self._monitors.clear()

@@ -91,13 +91,17 @@ export const api = {
   getKalshiEvents: () => request<any>('/kalshi/events'),
   getKalshiMarket: (ticker: string) => request<any>(`/kalshi/markets/${ticker}`),
   getKalshiPortfolio: () => request<any>('/kalshi/portfolio'),
+  getKalshiOrders: (status?: string) => request<any>(`/kalshi/orders${status ? `?status=${status}` : ''}`),
+  getKalshiTrades: (limit = 50) => request<any[]>(`/kalshi/trades?limit=${limit}`),
   getKalshiEstimates: (limit = 50) => request<any[]>(`/kalshi/estimates?limit=${limit}`),
+  getKalshiDecisions: (limit = 50) => request<any[]>(`/kalshi/decisions?limit=${limit}`),
   scanKalshi: () => request<any>('/kalshi/scan', { method: 'POST' }),
 
   // Crypto
   getCryptoSignals: (symbol?: string) =>
     request<any[]>(`/crypto/signals${symbol ? `/${symbol}` : ''}`),
   getCryptoBars: (symbol: string) => request<any>(`/crypto/bars/${symbol}`),
+  getCryptoDecisions: (limit = 50) => request<any[]>(`/crypto/decisions?limit=${limit}`),
   scanCrypto: () => request<any>('/crypto/scan', { method: 'POST' }),
   getCryptoPortfolio: () => request<any>('/crypto/portfolio'),
 };
