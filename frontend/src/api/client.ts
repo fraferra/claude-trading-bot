@@ -2,6 +2,7 @@ const BASE = '/api';
 
 async function request<T>(path: string, opts?: RequestInit): Promise<T> {
   const resp = await fetch(`${BASE}${path}`, {
+    credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json', ...opts?.headers },
     ...opts,
   });
