@@ -454,9 +454,10 @@ export default function Kalshi() {
       )}
 
       {/* Settled Bets */}
-      {settlements && (settlements as any[]).length > 0 && (
-        <Card title={`Settled Bets (${(settlements as any[]).length})`}>
-          <p className="text-xs text-slate-500 mb-2">Concluded markets with final payout/loss</p>
+      <Card title={`Settled Bets (${(settlements as any[] || []).length})`}>
+        {!settlements || (settlements as any[]).length === 0 ? (
+          <p className="text-slate-500 text-sm">No bets have settled yet. When a market you traded concludes, the payout or loss will appear here.</p>
+        ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -521,8 +522,8 @@ export default function Kalshi() {
               </tfoot>
             </table>
           </div>
-        </Card>
-      )}
+        )}
+      </Card>
     </div>
   );
 }
