@@ -27,6 +27,10 @@ class BasicAuthMiddleware(BaseHTTPMiddleware):
         if not self._enabled:
             return await call_next(request)
 
+        # Skip auth for WebSocket upgrade requests (handled separately)
+        if request.headers.get("upgrade", "").lower() == "websocket":
+            return await call_next(request)
+
         auth = request.headers.get("Authorization", "")
         if auth.startswith("Basic "):
             try:
@@ -39,6 +43,16 @@ class BasicAuthMiddleware(BaseHTTPMiddleware):
                     return await call_next(request)
             except Exception:
                 pass
+
+        # For API requests (XHR/fetch), return 401 WITHOUT WWW-Authenticate
+        # to prevent the browser from popping up its native auth dialog.
+        # Only send WWW-Authenticate on page loads so the browser prompts once.
+        is_api = request.url.path.startswith("/api/")
+        is_fetch = "application/json" in request.headers.get("accept", "")
+        is_xhr = request.headers.get("x-requested-with", "").lower() == "xmlhttprequest"
+
+        if is_api or is_fetch or is_xhr:
+            return Response(status_code=401, content="Unauthorized")
 
         return Response(
             status_code=401,
