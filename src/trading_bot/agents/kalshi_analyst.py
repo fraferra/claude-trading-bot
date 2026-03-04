@@ -113,6 +113,7 @@ class KalshiAnalystAgent:
         """Convert probability estimates with sufficient edge into trade decisions."""
         decisions = []
         total_exposure = 0.0
+        remaining_cash = portfolio.cash
 
         # Sort by absolute edge (best opportunities first)
         sorted_estimates = sorted(estimates, key=lambda e: abs(e.edge_pct), reverse=True)
@@ -130,13 +131,21 @@ class KalshiAnalystAgent:
             if total_exposure >= self._kalshi_cfg.max_total_exposure_usd:
                 break
 
+            # Check remaining cash
+            if remaining_cash <= 0:
+                break
+
             # Size using Kelly with cap
             size_usd = self._calculate_position_size(est, portfolio)
             if size_usd <= 0:
                 continue
 
-            # Ensure we don't exceed total exposure
-            size_usd = min(size_usd, self._kalshi_cfg.max_total_exposure_usd - total_exposure)
+            # Ensure we don't exceed total exposure or available cash
+            size_usd = min(
+                size_usd,
+                self._kalshi_cfg.max_total_exposure_usd - total_exposure,
+                remaining_cash,
+            )
 
             action = Action.BUY if est.edge_pct > 0 else Action.SELL
             side = est.suggested_side or (Side.BUY if action == Action.BUY else Side.SELL)
@@ -154,6 +163,7 @@ class KalshiAnalystAgent:
                 side=side,
             ))
             total_exposure += size_usd
+            remaining_cash -= size_usd
 
         log.info(
             f"Kalshi Analyst: {len(estimates)} estimates → "
