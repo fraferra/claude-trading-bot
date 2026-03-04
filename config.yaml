@@ -1,0 +1,111 @@
+# Claude Trading Bot Configuration
+
+# Trading mode: "paper" or "live"
+mode: paper
+
+# LLM settings
+llm:
+  model: claude-sonnet-4-5-20250929          # Default for all agents
+  strategist_model: claude-opus-4-6  # Opus for weekly strategy review
+  max_tokens: 4096
+
+# Risk management
+risk:
+  max_position_pct: 0.10        # Max 10% of portfolio per position
+  max_total_exposure_pct: 0.80  # Max 80% total invested
+  daily_loss_limit_pct: 0.03    # Stop trading if daily loss > 3%
+  min_confidence: 0.60          # Reject decisions below 60% confidence
+  max_trades_per_day: 10        # Max trades per day
+
+# Alpaca settings
+alpaca:
+  paper: true
+  # Data feed: "iex" (free) or "sip" (paid, requires subscription)
+  data_feed: iex
+
+# Polymarket settings
+polymarket:
+  paper: true
+  paper_balance: 10000.0  # Starting virtual USDC balance
+
+# Stock analysis defaults
+stocks:
+  default_period: 3mo     # Default lookback period for price data
+  watchlist:
+    - AAPL
+    - MSFT
+    - GOOGL
+    - AMZN
+    - NVDA
+    - TSLA
+    - META
+    - SPY
+
+# Continuous run settings
+run:
+  interval_minutes: 30
+  auto_execute: false  # Require confirmation for each trade
+
+# Strategy configurations
+strategies:
+  arbitrage:
+    min_edge_pct: 0.02          # 2% minimum edge after fees
+    fee_estimate_pct: 0.01      # 1% estimated fee per leg
+    max_events_to_scan: 200
+    max_size_per_leg_usd: 500.0
+  cross_market:
+    min_edge_pct: 0.03          # 3% minimum divergence
+    max_markets_per_batch: 20   # Batch size for LLM calls
+    max_pairs_to_analyze: 50
+    max_size_usd: 300.0
+  probability_edge:
+    min_edge_pct: 0.10          # 10% minimum AI vs market edge
+    kelly_fraction_cap: 0.25    # Quarter-Kelly for safety
+    max_size_usd: 500.0
+    track_accuracy: true
+
+# Kalshi prediction market settings
+kalshi:
+  demo: true
+  scan_interval_minutes: 45
+  max_events_to_scan: 100
+  min_edge_pct: 0.08
+  kelly_fraction_cap: 0.20
+  max_size_usd: 200.0
+  max_total_exposure_usd: 2000.0
+  max_positions: 15
+  categories:
+    - politics
+    - economics
+    - science
+    - climate
+    - finance
+
+# Crypto momentum strategy
+crypto:
+  scan_interval_minutes: 15
+  watchlist:
+    - BTC/USD
+    - ETH/USD
+    - SOL/USD
+    - AVAX/USD
+    - LINK/USD
+  bar_timeframe: 15Min
+  lookback_bars: 100
+  min_signal_score: 0.6
+  max_position_pct: 0.08
+  max_total_exposure_pct: 0.50
+  max_size_usd: 1000.0
+  llm_confirmation_enabled: true
+
+# Autonomous research agent
+research_agent:
+  scan_interval_minutes: 240    # Run pipeline every 4 hours
+  max_candidates: 20            # Max stocks to discover per cycle
+  max_positions: 10             # Max portfolio positions
+  max_single_position_pct: 0.15 # 15% max per stock
+  min_cash_reserve_pct: 0.20    # Keep 20% cash
+  rebalance_drift_threshold: 0.05  # 5% drift triggers rebalance
+  min_research_score: 5.0       # Min score to consider (1-10)
+  strategy_review_day: sunday   # Weekly review day
+  enabled: true

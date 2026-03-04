@@ -1,0 +1,16 @@
+services:
+  trading-bot:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file: .env
+    environment:
+      - AUTH_USERNAME=${AUTH_USERNAME}
+      - AUTH_PASSWORD=${AUTH_PASSWORD}
+      - DB_PATH=/app/data/trading_bot.db
+    volumes:
+      - bot-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  bot-data:
