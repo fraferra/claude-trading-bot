@@ -66,7 +66,7 @@ strategies:
 
 # Kalshi prediction market settings
 kalshi:
-  demo: true
+  demo: false  # Set to true for demo-api.kalshi.co, false for production
   scan_interval_minutes: 45
   max_events_to_scan: 100
   min_edge_pct: 0.08

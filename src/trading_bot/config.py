@@ -225,6 +225,8 @@ def load_config(config_path: str | Path | None = None) -> Config:
 
     cfg.kalshi.api_key_id = os.getenv("KALSHI_API_KEY_ID", "")
     cfg.kalshi.private_key = os.getenv("KALSHI_PRIVATE_KEY", "")
+    if os.getenv("KALSHI_DEMO") is not None:
+        cfg.kalshi.demo = os.getenv("KALSHI_DEMO", "true").lower() in ("true", "1", "yes")
 
     cfg.auth.username = os.getenv("AUTH_USERNAME", "")
     cfg.auth.password = os.getenv("AUTH_PASSWORD", "")
