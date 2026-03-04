@@ -57,10 +57,13 @@ class KalshiBroker(BaseBroker):
         cfg = Configuration(host=host)
         client = KalshiClient(configuration=cfg)
         if config.api_key_id and config.private_key:
+            # Handle escaped newlines from env vars (e.g. literal \n → actual newlines)
+            key_content = config.private_key.replace("\\n", "\n")
             # kalshi-python expects a file path, so write key to temp file
             tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".pem", delete=False)
-            tmp.write(config.private_key)
-            tmp.flush()
+            tmp.write(key_content)
+            tmp.close()  # Close so kalshi-python can read it
+            log.info(f"Kalshi auth: key_id={config.api_key_id[:8]}..., key_file={tmp.name}")
             client.set_kalshi_auth(
                 key_id=config.api_key_id,
                 private_key_path=tmp.name,

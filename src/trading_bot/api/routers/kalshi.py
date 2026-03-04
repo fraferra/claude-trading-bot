@@ -36,8 +36,11 @@ async def get_kalshi_portfolio(request: Request):
     broker = request.app.state.brokers.get("kalshi")
     if not broker:
         return {"error": "Kalshi broker not configured"}
-    portfolio = await broker.get_account()
-    return portfolio.model_dump()
+    try:
+        portfolio = await broker.get_account()
+        return portfolio.model_dump()
+    except Exception as e:
+        return {"error": f"Kalshi API error: {str(e)}"}
 
 
 @router.get("/kalshi/estimates")

@@ -50,7 +50,7 @@ export default function Kalshi() {
       {!hasPortfolio && (
         <Card title="Kalshi Not Connected">
           <p className="text-slate-400">
-            Set KALSHI_API_KEY_ID and KALSHI_PRIVATE_KEY environment variables to connect.
+            {portfolio?.error || 'Set KALSHI_API_KEY_ID and KALSHI_PRIVATE_KEY environment variables to connect.'}
           </p>
         </Card>
       )}
