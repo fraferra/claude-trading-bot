@@ -190,6 +190,53 @@ CREATE TABLE IF NOT EXISTS crypto_signals (
 
 CREATE INDEX IF NOT EXISTS idx_crypto_signals_symbol ON crypto_signals(symbol);
 CREATE INDEX IF NOT EXISTS idx_crypto_signals_created ON crypto_signals(created_at);
+
+-- Unified agent decision log for visibility into decision-making
+CREATE TABLE IF NOT EXISTS agent_decisions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_type TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    action TEXT NOT NULL,
+    confidence REAL,
+    reasoning TEXT,
+    signals_json TEXT,
+    outcome TEXT,
+    trade_id INTEGER,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_decisions_type ON agent_decisions(agent_type);
+CREATE INDEX IF NOT EXISTS idx_agent_decisions_created ON agent_decisions(created_at);
+
+-- Portfolio drawdown tracking (high watermark and drawdown history)
+CREATE TABLE IF NOT EXISTS portfolio_drawdown (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    platform TEXT NOT NULL DEFAULT 'alpaca',
+    equity REAL NOT NULL,
+    high_watermark REAL NOT NULL,
+    drawdown_pct REAL NOT NULL DEFAULT 0.0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_portfolio_drawdown_created ON portfolio_drawdown(created_at);
+
+-- Kalshi settlement tracking for concluded bets
+CREATE TABLE IF NOT EXISTS kalshi_settlements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    trade_id INTEGER NOT NULL,
+    ticker TEXT NOT NULL,
+    side TEXT NOT NULL,
+    quantity REAL NOT NULL,
+    entry_price REAL NOT NULL,
+    result TEXT NOT NULL,
+    payout_per_contract REAL NOT NULL,
+    total_pnl REAL NOT NULL,
+    settled_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (trade_id) REFERENCES trades(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_kalshi_settlements_ticker ON kalshi_settlements(ticker);
+CREATE INDEX IF NOT EXISTS idx_kalshi_settlements_settled ON kalshi_settlements(settled_at);
 """
 
 

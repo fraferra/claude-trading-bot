@@ -106,8 +106,15 @@ class KalshiBroker(BaseBroker):
         )
         positions = []
         market_positions = resp.positions if resp.positions else []
+        log.info(f"Kalshi get_positions: {len(market_positions)} raw positions returned")
         for p in market_positions:
-            qty = p.position if p.position else 0
+            qty = p.position if p.position is not None else 0
+            settled = getattr(p, "market_result", None)
+            realized = getattr(p, "realized_pnl", None)
+            log.info(
+                f"  Position {p.ticker}: qty={qty}, total_cost={p.total_cost}, "
+                f"market_result={settled}, realized_pnl={realized}"
+            )
             if qty == 0:
                 continue
             # Get current price
@@ -115,7 +122,7 @@ class KalshiBroker(BaseBroker):
                 price = await self.get_quote(p.ticker)
             except Exception:
                 price = 0.0
-            cost_cents = p.total_cost if p.total_cost else 0
+            cost_cents = p.total_cost if p.total_cost is not None else 0
             positions.append(Position(
                 symbol=p.ticker,
                 quantity=float(abs(qty)),
@@ -151,23 +158,21 @@ class KalshiBroker(BaseBroker):
         )
 
         try:
-            from kalshi_python.models import CreateOrderRequest as KalshiOrderRequest
-            order_req = KalshiOrderRequest(
-                ticker=order.symbol,
-                side=kalshi_side,
-                action=kalshi_action,
-                count=count,
-                type="limit",
-                yes_price=limit_price_cents,
-            )
+            # Kalshi SDK v2.1+ accepts kwargs directly (no create_order_request=)
             resp = await loop.run_in_executor(
                 None,
                 partial(
                     self._client._portfolio_api.create_order,
-                    create_order_request=order_req,
+                    ticker=order.symbol,
+                    side=kalshi_side,
+                    action=kalshi_action,
+                    count=count,
+                    type="limit",
+                    yes_price=limit_price_cents,
                 ),
             )
             result_order = resp.order
+            order_id = result_order.order_id or ""
             status = _STATUS_MAP.get(
                 result_order.status if result_order.status else "pending",
                 OrderStatus.PENDING,
@@ -177,8 +182,36 @@ class KalshiBroker(BaseBroker):
             if status == OrderStatus.FILLED and result_order.yes_price:
                 filled_price = self.cents_to_decimal(result_order.yes_price)
 
+            # Kalshi limit orders often return "resting" initially but fill
+            # within seconds. Poll briefly to capture the actual fill.
+            if status == OrderStatus.PENDING and order_id:
+                for _attempt in range(3):
+                    await asyncio.sleep(1.0)
+                    try:
+                        poll_resp = await loop.run_in_executor(
+                            None,
+                            partial(self._client._portfolio_api.get_order, order_id),
+                        )
+                        poll_order = poll_resp.order
+                        poll_status = _STATUS_MAP.get(
+                            poll_order.status if poll_order.status else "pending",
+                            OrderStatus.PENDING,
+                        )
+                        if poll_status == OrderStatus.FILLED:
+                            status = OrderStatus.FILLED
+                            if poll_order.yes_price:
+                                filled_price = self.cents_to_decimal(poll_order.yes_price)
+                            break
+                    except Exception:
+                        break
+
+                # If still resting after polling, use the limit price as
+                # filled_price — on Kalshi, limit orders fill at limit or better.
+                if status == OrderStatus.PENDING and filled_price is None:
+                    filled_price = self.cents_to_decimal(limit_price_cents)
+
             return OrderResult(
-                order_id=result_order.order_id or "",
+                order_id=order_id,
                 symbol=order.symbol,
                 side=order.side,
                 quantity=float(count),
@@ -238,6 +271,44 @@ class KalshiBroker(BaseBroker):
 
     # --- Kalshi-specific methods ---
 
+    async def get_orders(self, status: str | None = None) -> list[dict]:
+        """Fetch orders from Kalshi, optionally filtered by status.
+
+        Status values: 'resting', 'executed', 'canceled', 'pending'.
+        """
+        loop = asyncio.get_event_loop()
+        kwargs: dict = {"limit": 200}
+        if status:
+            kwargs["status"] = status
+        resp = await loop.run_in_executor(
+            None, partial(self._client._portfolio_api.get_orders, **kwargs)
+        )
+        orders = []
+        for o in (resp.orders or []):
+            yes_price = self.cents_to_decimal(o.yes_price) if o.yes_price else None
+            no_price = self.cents_to_decimal(o.no_price) if o.no_price else None
+            count = o.count if o.count is not None else 0
+            remaining = o.remaining_count if o.remaining_count is not None else 0
+            log.debug(
+                f"  Order {o.ticker}: status={o.status}, count={o.count}, "
+                f"remaining={o.remaining_count}, side={o.side}, action={o.action}"
+            )
+            orders.append({
+                "order_id": o.order_id or "",
+                "ticker": o.ticker or "",
+                "side": o.side or "",
+                "action": o.action or "",
+                "type": o.type or "",
+                "status": o.status or "",
+                "yes_price": yes_price,
+                "no_price": no_price,
+                "count": count,
+                "remaining_count": remaining,
+                "filled_count": count - remaining,
+                "created_time": str(o.created_time or ""),
+            })
+        return orders
+
     async def get_events(
         self, category: str = "", limit: int = 100
     ) -> list[KalshiEventData]:
@@ -287,6 +358,20 @@ class KalshiBroker(BaseBroker):
             None, partial(self._client._markets_api.get_market, ticker)
         )
         return self._parse_market(resp.market)
+
+    async def check_market_settled(self, ticker: str) -> tuple[bool, str]:
+        """Check if a Kalshi market has settled.
+
+        Returns (is_settled, result) where result is 'yes', 'no', or ''.
+        """
+        try:
+            market = await self.get_market(ticker)
+            if market.result:
+                return True, market.result.lower()
+            return False, ""
+        except Exception as e:
+            log.warning(f"Failed to check settlement for {ticker}: {e}")
+            return False, ""
 
     def _parse_market(self, m) -> KalshiMarketData:
         """Parse a Kalshi Market object into our KalshiMarketData model."""

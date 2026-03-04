@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { RefreshCw, TrendingUp, TrendingDown, Minus, ChevronDown, ChevronRight } from 'lucide-react';
+import { RefreshCw, TrendingUp, TrendingDown, Minus, ChevronDown, ChevronRight, CheckCircle, XCircle } from 'lucide-react';
 import { api } from '../api/client';
 import Card from '../components/Card';
 
@@ -13,6 +13,9 @@ function OutcomeBadge({ outcome }: { outcome: string }) {
     filtered_edge: 'bg-yellow-500/20 text-yellow-400',
     filtered_signal: 'bg-slate-500/20 text-slate-400',
     llm_vetoed: 'bg-orange-500/20 text-orange-400',
+    skipped: 'bg-slate-500/20 text-slate-400',
+    settled_win: 'bg-green-500/20 text-green-400',
+    settled_loss: 'bg-red-500/20 text-red-400',
   };
   return (
     <span className={`px-2 py-0.5 rounded text-xs font-medium ${colors[outcome] || 'bg-slate-700 text-slate-300'}`}>
@@ -91,6 +94,7 @@ export default function Kalshi() {
   const { data: trades } = useQuery({ queryKey: ['kalshi-trades'], queryFn: () => api.getKalshiTrades(50), refetchInterval: 15000 });
   const { data: estimates } = useQuery({ queryKey: ['kalshi-estimates'], queryFn: () => api.getKalshiEstimates(30), refetchInterval: 15000 });
   const { data: decisions } = useQuery({ queryKey: ['kalshi-decisions'], queryFn: () => api.getKalshiDecisions(50), refetchInterval: 15000 });
+  const { data: settlements } = useQuery({ queryKey: ['kalshi-settlements'], queryFn: () => api.getKalshiSettlements(50), refetchInterval: 30000 });
 
   const restingOrders = orders?.orders?.filter((o: any) => o.status === 'resting') || [];
   const executedOrders = orders?.orders?.filter((o: any) => o.status === 'executed') || [];
@@ -103,6 +107,7 @@ export default function Kalshi() {
       queryClient.invalidateQueries({ queryKey: ['kalshi-decisions'] });
       queryClient.invalidateQueries({ queryKey: ['kalshi-orders'] });
       queryClient.invalidateQueries({ queryKey: ['kalshi-trades'] });
+      queryClient.invalidateQueries({ queryKey: ['kalshi-settlements'] });
     },
   });
 
@@ -123,19 +128,34 @@ export default function Kalshi() {
       </div>
 
       {/* Portfolio Summary */}
-      {hasPortfolio && (
-        <div className="grid grid-cols-3 gap-4">
-          <Card title="Balance">
-            <p className="text-2xl font-bold text-white">${portfolio.cash?.toFixed(2) ?? '0.00'}</p>
-          </Card>
-          <Card title="Total Equity">
-            <p className="text-2xl font-bold text-white">${portfolio.equity?.toFixed(2) ?? '0.00'}</p>
-          </Card>
-          <Card title="Positions">
-            <p className="text-2xl font-bold text-white">{portfolio.positions?.length ?? 0}</p>
-          </Card>
-        </div>
-      )}
+      {hasPortfolio && (() => {
+        const settledPnl = (settlements as any[] || []).reduce((sum: number, s: any) => sum + (s.total_pnl || 0), 0);
+        const wins = (settlements as any[] || []).filter((s: any) => s.total_pnl > 0).length;
+        const losses = (settlements as any[] || []).filter((s: any) => s.total_pnl <= 0).length;
+        return (
+          <div className="grid grid-cols-4 gap-4">
+            <Card title="Balance">
+              <p className="text-2xl font-bold text-white">${portfolio.cash?.toFixed(2) ?? '0.00'}</p>
+            </Card>
+            <Card title="Total Equity">
+              <p className="text-2xl font-bold text-white">${portfolio.equity?.toFixed(2) ?? '0.00'}</p>
+            </Card>
+            <Card title="Open Positions">
+              <p className="text-2xl font-bold text-white">{portfolio.positions?.length ?? 0}</p>
+            </Card>
+            <Card title="Settled P&L">
+              <p className={`text-2xl font-bold ${settledPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                {settledPnl >= 0 ? '+' : ''}${settledPnl.toFixed(2)}
+              </p>
+              {(wins + losses) > 0 && (
+                <p className="text-xs text-slate-500 mt-1">
+                  <span className="text-green-400">{wins}W</span> / <span className="text-red-400">{losses}L</span>
+                </p>
+              )}
+            </Card>
+          </div>
+        );
+      })()}
 
       {!hasPortfolio && (
         <Card title="Kalshi Not Connected">
@@ -428,6 +448,77 @@ export default function Kalshi() {
                   </tr>
                 ))}
               </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+
+      {/* Settled Bets */}
+      {settlements && (settlements as any[]).length > 0 && (
+        <Card title={`Settled Bets (${(settlements as any[]).length})`}>
+          <p className="text-xs text-slate-500 mb-2">Concluded markets with final payout/loss</p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-slate-400 border-b border-slate-800">
+                  <th className="text-left py-2">Market</th>
+                  <th className="text-center py-2">Side</th>
+                  <th className="text-right py-2">Qty</th>
+                  <th className="text-right py-2">Entry</th>
+                  <th className="text-center py-2">Result</th>
+                  <th className="text-right py-2">Payout/Contract</th>
+                  <th className="text-right py-2">Total P&L</th>
+                  <th className="text-right py-2">Settled</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(settlements as any[]).map((s: any, i: number) => {
+                  const isWin = s.total_pnl > 0;
+                  return (
+                    <tr key={i} className="border-b border-slate-800/50">
+                      <td className="py-2 text-white font-mono text-xs">{s.ticker}</td>
+                      <td className="py-2 text-center">
+                        <span className={s.side === 'buy' ? 'text-green-400' : 'text-red-400'}>
+                          {s.side?.toUpperCase()}
+                        </span>
+                      </td>
+                      <td className="py-2 text-right text-slate-300">{s.quantity}</td>
+                      <td className="py-2 text-right text-slate-300">{(s.entry_price * 100).toFixed(0)}c</td>
+                      <td className="py-2 text-center">
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium ${
+                          s.result === 'yes' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
+                        }`}>
+                          {s.result === 'yes' ? <CheckCircle size={12} /> : <XCircle size={12} />}
+                          {s.result?.toUpperCase()}
+                        </span>
+                      </td>
+                      <td className={`py-2 text-right font-medium ${s.payout_per_contract >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                        {s.payout_per_contract >= 0 ? '+' : ''}{(s.payout_per_contract * 100).toFixed(0)}c
+                      </td>
+                      <td className={`py-2 text-right font-bold ${isWin ? 'text-green-400' : 'text-red-400'}`}>
+                        {isWin ? '+' : ''}${s.total_pnl?.toFixed(2)}
+                      </td>
+                      <td className="py-2 text-right text-slate-500 text-xs">
+                        {s.settled_at ? new Date(s.settled_at).toLocaleString() : '—'}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot>
+                <tr className="border-t-2 border-slate-700">
+                  <td colSpan={6} className="py-2 text-right text-slate-400 font-medium">Total Settled P&L:</td>
+                  {(() => {
+                    const total = (settlements as any[]).reduce((sum: number, s: any) => sum + (s.total_pnl || 0), 0);
+                    return (
+                      <td className={`py-2 text-right font-bold text-lg ${total >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                        {total >= 0 ? '+' : ''}${total.toFixed(2)}
+                      </td>
+                    );
+                  })()}
+                  <td></td>
+                </tr>
+              </tfoot>
             </table>
           </div>
         </Card>

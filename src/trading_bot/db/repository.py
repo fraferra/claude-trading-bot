@@ -644,3 +644,56 @@ class Repository:
         )
         rows = await cursor.fetchall()
         return sum(dict(r)["net_qty"] * dict(r)["last_price"] for r in rows if dict(r)["last_price"])
+
+    # --- Kalshi Settlements ---
+
+    async def insert_kalshi_settlement(
+        self,
+        trade_id: int,
+        ticker: str,
+        side: str,
+        quantity: float,
+        entry_price: float,
+        result: str,
+        payout_per_contract: float,
+        total_pnl: float,
+    ) -> int:
+        cursor = await self._db.db.execute(
+            """INSERT INTO kalshi_settlements
+               (trade_id, ticker, side, quantity, entry_price, result, payout_per_contract, total_pnl)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (trade_id, ticker, side, quantity, entry_price, result, payout_per_contract, total_pnl),
+        )
+        await self._db.db.commit()
+        return cursor.lastrowid  # type: ignore[return-value]
+
+    async def get_kalshi_settlements(self, limit: int = 50) -> list[dict]:
+        cursor = await self._db.db.execute(
+            """SELECT ks.*, t.reasoning, t.source
+               FROM kalshi_settlements ks
+               JOIN trades t ON ks.trade_id = t.id
+               ORDER BY ks.settled_at DESC LIMIT ?""",
+            (limit,),
+        )
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+
+    async def get_settled_trade_ids(self) -> set[int]:
+        """Get trade IDs that have already been settled."""
+        cursor = await self._db.db.execute(
+            "SELECT trade_id FROM kalshi_settlements"
+        )
+        rows = await cursor.fetchall()
+        return {row["trade_id"] for row in rows}
+
+    async def get_unsettled_kalshi_trades(self) -> list[dict]:
+        """Get all Kalshi trades that haven't been settled yet."""
+        cursor = await self._db.db.execute(
+            """SELECT t.* FROM trades t
+               WHERE t.platform = 'kalshi'
+               AND t.status = 'filled'
+               AND t.id NOT IN (SELECT trade_id FROM kalshi_settlements)
+               ORDER BY t.created_at ASC"""
+        )
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]

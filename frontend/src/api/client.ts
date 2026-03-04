@@ -95,6 +95,7 @@ export const api = {
   getKalshiTrades: (limit = 50) => request<any[]>(`/kalshi/trades?limit=${limit}`),
   getKalshiEstimates: (limit = 50) => request<any[]>(`/kalshi/estimates?limit=${limit}`),
   getKalshiDecisions: (limit = 50) => request<any[]>(`/kalshi/decisions?limit=${limit}`),
+  getKalshiSettlements: (limit = 50) => request<any[]>(`/kalshi/settlements?limit=${limit}`),
   scanKalshi: () => request<any>('/kalshi/scan', { method: 'POST' }),
 
   // Crypto
@@ -104,4 +105,14 @@ export const api = {
   getCryptoDecisions: (limit = 50) => request<any[]>(`/crypto/decisions?limit=${limit}`),
   scanCrypto: () => request<any>('/crypto/scan', { method: 'POST' }),
   getCryptoPortfolio: () => request<any>('/crypto/portfolio'),
+
+  // Shorts
+  getShortProposals: (status = 'pending_approval') =>
+    request<any[]>(`/shorts/proposals?status=${status}`),
+  getShortDecisions: (limit = 50) => request<any[]>(`/shorts/decisions?limit=${limit}`),
+  approveShort: (id: number) =>
+    request<any>(`/shorts/${id}/approve`, { method: 'POST' }),
+  rejectShort: (id: number) =>
+    request<any>(`/shorts/${id}/reject`, { method: 'POST' }),
+  scanShorts: () => request<any>('/shorts/scan', { method: 'POST' }),
 };

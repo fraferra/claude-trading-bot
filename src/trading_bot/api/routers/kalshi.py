@@ -89,6 +89,15 @@ async def get_kalshi_decisions(
     )
 
 
+@router.get("/kalshi/settlements")
+async def get_kalshi_settlements(
+    limit: int = 50,
+    repo: Repository = Depends(get_repo),
+):
+    """Get Kalshi settlement history (concluded bets with P&L)."""
+    return await repo.get_kalshi_settlements(limit=limit)
+
+
 @router.post("/kalshi/scan")
 async def trigger_kalshi_scan(request: Request, repo: Repository = Depends(get_repo)):
     """Trigger a full Kalshi discovery + analysis cycle."""
