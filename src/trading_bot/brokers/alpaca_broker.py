@@ -84,6 +84,7 @@ class AlpacaBroker(BaseBroker):
                 current_price=float(p.current_price),
                 market_value=float(p.market_value),
                 unrealized_pnl=float(p.unrealized_pl),
+                unrealized_intraday_pl=float(p.unrealized_intraday_pl) if p.unrealized_intraday_pl else 0.0,
                 platform=Platform.ALPACA,
             )
             for p in raw_positions

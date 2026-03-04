@@ -78,7 +78,8 @@ export default function Dashboard() {
                   <th className="pb-2">Symbol</th>
                   <th className="pb-2 text-right">Qty</th>
                   <th className="pb-2 text-right">Value</th>
-                  <th className="pb-2 text-right">P&L</th>
+                  <th className="pb-2 text-right">Today</th>
+                  <th className="pb-2 text-right">Total P&L</th>
                 </tr>
               </thead>
               <tbody>
@@ -87,6 +88,9 @@ export default function Dashboard() {
                     <td className="py-2 text-white">{p.symbol}</td>
                     <td className="py-2 text-right">{p.quantity?.toFixed(2)}</td>
                     <td className="py-2 text-right">${p.market_value?.toFixed(2)}</td>
+                    <td className={`py-2 text-right ${(p.unrealized_intraday_pl || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                      ${(p.unrealized_intraday_pl || 0)?.toFixed(2)}
+                    </td>
                     <td className={`py-2 text-right ${p.unrealized_pnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                       ${p.unrealized_pnl?.toFixed(2)}
                     </td>

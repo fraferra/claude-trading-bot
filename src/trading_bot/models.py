@@ -94,6 +94,7 @@ class Position(BaseModel):
     current_price: float = 0.0
     market_value: float = 0.0
     unrealized_pnl: float = 0.0
+    unrealized_intraday_pl: float = 0.0
     platform: Platform
 
 
@@ -326,6 +327,7 @@ class WSEventType(str, Enum):
     TRADE_EXECUTED = "trade_executed"
     STRATEGY_SIGNAL = "strategy_signal"
     MONITOR_STATUS = "monitor_status"
+    SHORT_PROPOSAL = "short_proposal"
     ERROR = "error"
 
 
@@ -477,6 +479,25 @@ class CryptoTradeDecision(BaseModel):
     suggested_size_usd: float = 0.0
     order_type: OrderType = OrderType.LIMIT
     limit_price: float | None = None
+
+
+# --- Short Selling Models ---
+
+class ShortSignals(BaseModel):
+    """Technical signals used for short candidate scoring."""
+    symbol: str
+    rsi_2: float | None = None
+    rsi_14: float | None = None
+    bb_pct_b: float | None = None
+    macd_histogram: float | None = None
+    macd_hist_declining: bool = False
+    volume_ratio: float | None = None
+    price_vs_sma200: float | None = None
+    atr_14: float | None = None
+    pe_ratio: float | None = None
+    current_price: float = 0.0
+    short_score: float = 0.0
+    signal_breakdown: dict[str, float] = Field(default_factory=dict)
 
 
 class StrategyMemo(BaseModel):
