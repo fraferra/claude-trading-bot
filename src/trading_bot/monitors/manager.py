@@ -52,15 +52,21 @@ class MonitorManager:
         """On startup, restore previously-running monitors."""
         states = await self.repo.get_all_monitor_states()
         for state in states:
+            # Sync _counter to avoid ID collisions with previously-created monitors
+            mid = state["monitor_id"]
+            parts = mid.rsplit("_", 1)
+            if len(parts) == 2 and parts[1].isdigit():
+                self._counter = max(self._counter, int(parts[1]))
+
             if state["status"] == "running":
                 try:
-                    monitor = self._create_monitor(state["monitor_type"], state["monitor_id"])
+                    monitor = self._create_monitor(state["monitor_type"], mid)
                     if monitor:
-                        self._monitors[state["monitor_id"]] = monitor
+                        self._monitors[mid] = monitor
                         await monitor.start()
-                        log.info(f"Restored monitor: {state['monitor_id']}")
+                        log.info(f"Restored monitor: {mid}")
                 except Exception as e:
-                    log.warning(f"Failed to restore monitor {state['monitor_id']}: {e}")
+                    log.warning(f"Failed to restore monitor {mid}: {e}")
 
     def _create_monitor(self, monitor_type: str, monitor_id: str) -> BaseMonitor | None:
         cls = MONITOR_TYPES.get(monitor_type)
