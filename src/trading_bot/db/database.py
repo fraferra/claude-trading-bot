@@ -237,6 +237,7 @@ CREATE TABLE IF NOT EXISTS kalshi_settlements (
 
 CREATE INDEX IF NOT EXISTS idx_kalshi_settlements_ticker ON kalshi_settlements(ticker);
 CREATE INDEX IF NOT EXISTS idx_kalshi_settlements_settled ON kalshi_settlements(settled_at);
+CREATE INDEX IF NOT EXISTS idx_trades_platform ON trades(platform);
 """
 
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections import defaultdict, deque
 from datetime import datetime
 
 from trading_bot.db.database import Database
@@ -697,3 +698,90 @@ class Repository:
         )
         rows = await cursor.fetchall()
         return [dict(r) for r in rows]
+
+    # --- Cumulative P&L ---
+
+    async def get_cumulative_pnl(self, platform: str) -> list[dict]:
+        """Compute daily cumulative realized P&L for a platform.
+
+        For stocks/crypto: FIFO cost-basis matching of buy/sell trades.
+        For Kalshi: uses pre-calculated settlement P&L.
+
+        Returns list of {"date": "YYYY-MM-DD", "daily_pnl": float, "cumulative_pnl": float}.
+        """
+        if platform == "kalshi":
+            return await self._get_kalshi_cumulative_pnl()
+        return await self._get_trade_cumulative_pnl(platform)
+
+    async def _get_kalshi_cumulative_pnl(self) -> list[dict]:
+        """Cumulative P&L from Kalshi settlements."""
+        cursor = await self._db.db.execute(
+            """SELECT date(settled_at) as settle_date, SUM(total_pnl) as day_pnl
+               FROM kalshi_settlements
+               GROUP BY date(settled_at)
+               ORDER BY settle_date ASC"""
+        )
+        rows = await cursor.fetchall()
+        result = []
+        cumulative = 0.0
+        for row in rows:
+            r = dict(row)
+            cumulative += r["day_pnl"]
+            result.append({
+                "date": r["settle_date"],
+                "daily_pnl": round(r["day_pnl"], 2),
+                "cumulative_pnl": round(cumulative, 2),
+            })
+        return result
+
+    async def _get_trade_cumulative_pnl(self, platform: str) -> list[dict]:
+        """Cumulative realized P&L from FIFO trade matching for stocks/crypto."""
+        cursor = await self._db.db.execute(
+            """SELECT symbol, side, quantity, filled_price,
+                      date(created_at) as trade_date
+               FROM trades
+               WHERE platform = ? AND status = 'filled' AND filled_price IS NOT NULL
+               ORDER BY created_at ASC""",
+            (platform,),
+        )
+        rows = await cursor.fetchall()
+
+        # FIFO cost basis tracking per symbol
+        positions: dict[str, deque] = defaultdict(deque)
+        daily_pnl: dict[str, float] = defaultdict(float)
+
+        for row in rows:
+            r = dict(row)
+            symbol = r["symbol"]
+            side = r["side"]
+            qty = r["quantity"]
+            price = r["filled_price"]
+            date = r["trade_date"]
+
+            if side == "buy":
+                positions[symbol].append((qty, price))
+            elif side == "sell":
+                remaining = qty
+                while remaining > 0 and positions[symbol]:
+                    lot_qty, lot_price = positions[symbol][0]
+                    matched = min(remaining, lot_qty)
+                    realized = (price - lot_price) * matched
+                    daily_pnl[date] += realized
+                    remaining -= matched
+                    if matched >= lot_qty:
+                        positions[symbol].popleft()
+                    else:
+                        positions[symbol][0] = (lot_qty - matched, lot_price)
+
+        # Build cumulative series
+        sorted_dates = sorted(daily_pnl.keys())
+        result = []
+        cumulative = 0.0
+        for d in sorted_dates:
+            cumulative += daily_pnl[d]
+            result.append({
+                "date": d,
+                "daily_pnl": round(daily_pnl[d], 2),
+                "cumulative_pnl": round(cumulative, 2),
+            })
+        return result

@@ -67,6 +67,7 @@ export const api = {
   getStrategyResults: () => request<any[]>('/history/strategy-results'),
   getStockScores: (symbol?: string) =>
     request<any[]>(`/history/stock-scores${symbol ? `?symbol=${symbol}` : ''}`),
+  getCumulativePnl: () => request<Record<string, any[]>>('/history/cumulative-pnl'),
 
   // Config
   getConfig: () => request<any>('/config'),

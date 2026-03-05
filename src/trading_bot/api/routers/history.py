@@ -47,6 +47,19 @@ async def get_stock_scores(
     return await repo.get_stock_scores(symbol=symbol, limit=limit)
 
 
+@router.get("/history/cumulative-pnl")
+async def get_cumulative_pnl(
+    platform: str | None = None,
+    repo: Repository = Depends(get_repo),
+):
+    """Get cumulative realized P&L time series per platform."""
+    platforms = [platform] if platform else ["alpaca", "kalshi", "alpaca_crypto"]
+    result = {}
+    for p in platforms:
+        result[p] = await repo.get_cumulative_pnl(p)
+    return result
+
+
 @router.post("/history/backfill-prices")
 async def backfill_trade_prices(
     request: Request,
