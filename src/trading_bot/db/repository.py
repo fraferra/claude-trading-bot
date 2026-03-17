@@ -714,7 +714,23 @@ class Repository:
         return await self._get_trade_cumulative_pnl(platform)
 
     async def _get_kalshi_cumulative_pnl(self) -> list[dict]:
-        """Cumulative P&L from Kalshi settlements."""
+        """Cumulative P&L from Kalshi — combines trading P&L and settlement P&L.
+
+        Two sources of Kalshi P&L:
+        1. TRADING P&L: Buying contracts then selling before resolution (FIFO matching)
+        2. SETTLEMENT P&L: Holding contracts until the market resolves
+
+        A position can only generate one type of P&L (sold OR settled, not both),
+        so there is no double-counting.
+        """
+        daily_pnl: dict[str, float] = defaultdict(float)
+
+        # --- 1. Trading P&L from buy/sell pairs (FIFO matching) ---
+        trade_series = await self._get_trade_cumulative_pnl("kalshi")
+        for point in trade_series:
+            daily_pnl[point["date"]] += point["daily_pnl"]
+
+        # --- 2. Settlement P&L from resolved markets ---
         cursor = await self._db.db.execute(
             """SELECT date(settled_at) as settle_date, SUM(total_pnl) as day_pnl
                FROM kalshi_settlements
@@ -722,14 +738,18 @@ class Repository:
                ORDER BY settle_date ASC"""
         )
         rows = await cursor.fetchall()
-        result = []
-        cumulative = 0.0
         for row in rows:
             r = dict(row)
-            cumulative += r["day_pnl"]
+            daily_pnl[r["settle_date"]] += r["day_pnl"]
+
+        # --- Build cumulative series ---
+        result = []
+        cumulative = 0.0
+        for d in sorted(daily_pnl.keys()):
+            cumulative += daily_pnl[d]
             result.append({
-                "date": r["settle_date"],
-                "daily_pnl": round(r["day_pnl"], 2),
+                "date": d,
+                "daily_pnl": round(daily_pnl[d], 2),
                 "cumulative_pnl": round(cumulative, 2),
             })
         return result
@@ -785,3 +805,56 @@ class Repository:
                 "cumulative_pnl": round(cumulative, 2),
             })
         return result
+
+    # --- Position High Watermarks (for trailing stops) ---
+
+    async def upsert_high_watermark(
+        self, symbol: str, high_price: float, entry_price: float
+    ) -> None:
+        await self._db.db.execute(
+            """INSERT INTO position_high_watermarks (symbol, high_price, entry_price, updated_at)
+               VALUES (?, ?, ?, datetime('now'))
+               ON CONFLICT(symbol) DO UPDATE SET
+                   high_price = MAX(excluded.high_price, position_high_watermarks.high_price),
+                   updated_at = datetime('now')""",
+            (symbol, high_price, entry_price),
+        )
+        await self._db.db.commit()
+
+    async def get_high_watermark_price(self, symbol: str) -> dict | None:
+        cursor = await self._db.db.execute(
+            "SELECT * FROM position_high_watermarks WHERE symbol = ?", (symbol,)
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+    async def delete_high_watermark(self, symbol: str) -> None:
+        await self._db.db.execute(
+            "DELETE FROM position_high_watermarks WHERE symbol = ?", (symbol,)
+        )
+        await self._db.db.commit()
+
+    # --- Analytics Queries ---
+
+    async def get_all_trades_for_analytics(self, platform: str | None = None) -> list[dict]:
+        """Get all filled trades for analytics computation."""
+        query = "SELECT * FROM trades WHERE status = 'filled'"
+        params: list = []
+        if platform:
+            query += " AND platform = ?"
+            params.append(platform)
+        query += " ORDER BY created_at ASC"
+        cursor = await self._db.db.execute(query, params)
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+
+    async def get_trades_csv(self) -> list[dict]:
+        """Get all trades formatted for CSV export."""
+        cursor = await self._db.db.execute(
+            """SELECT id, order_id, symbol, side, quantity, filled_price,
+                      platform, source, strategy_name, reasoning,
+                      confidence, status, created_at
+               FROM trades ORDER BY created_at DESC"""
+        )
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]

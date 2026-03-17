@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from trading_bot.analysis.crypto_data import compute_crypto_technicals, get_crypto_bars
 from trading_bot.models import (
     Action, OrderRequest, OrderType, Platform, Side, WSEvent, WSEventType,
@@ -37,6 +39,35 @@ class CryptoMomentumMonitor(BaseMonitor):
 
         result = await strategy.scan(portfolio=portfolio)
 
+        # Log all scanned symbols (including those with no signal) for visibility
+        crypto_decisions = result.metadata.get("crypto_decisions", [])
+        crypto_map = {cd.get("symbol", ""): cd for cd in crypto_decisions}
+
+        # Log filtered-out symbols (scanned but no actionable signal)
+        all_scanned = result.metadata.get("all_scanned", [])
+        for scanned in all_scanned:
+            sym = scanned.get("symbol", "")
+            if not sym:
+                continue
+            signals = scanned.get("technical_signals", {})
+            reason = scanned.get("filtered_reason", "unknown")
+            llm_note = scanned.get("llm_reasoning", "")
+            composite = signals.get("composite_signal", 0) if signals else 0
+            direction = signals.get("signal_direction", "hold") if signals else "hold"
+            reasoning = f"Filtered ({reason}): composite={composite:.3f}, direction={direction}"
+            if llm_note:
+                reasoning += f". LLM: {llm_note[:300]}"
+            outcome = "llm_vetoed" if reason == "llm_vetoed" else "filtered_signal"
+            await self.repo.insert_agent_decision(
+                agent_type="crypto_momentum",
+                symbol=sym,
+                action="hold",
+                confidence=0.0,
+                reasoning=reasoning,
+                signals_json=json.dumps(signals),
+                outcome=outcome,
+            )
+
         if not result.decisions:
             log.debug("Crypto Monitor: no signals this cycle")
             return
@@ -50,10 +81,6 @@ class CryptoMomentumMonitor(BaseMonitor):
                     "source": f"monitor:{self.monitor_id}",
                 },
             ))
-
-        # Get crypto decision metadata for limit prices
-        crypto_decisions = result.metadata.get("crypto_decisions", [])
-        crypto_map = {cd.get("symbol", ""): cd for cd in crypto_decisions}
 
         for decision in result.decisions:
             try:
@@ -87,6 +114,21 @@ class CryptoMomentumMonitor(BaseMonitor):
                     llm_reasoning=cd.get("llm_reasoning", ""),
                 )
 
+                # Build signals JSON for decision log
+                decision_signals = {
+                    "current_price": current_price,
+                    "rsi_14": signals.get("rsi_14"),
+                    "macd": signals.get("macd"),
+                    "macd_signal": signals.get("macd_signal"),
+                    "bb_pct_b": signals.get("bb_pct_b"),
+                    "momentum_score": signals.get("momentum_score", 0.0),
+                    "mean_reversion_score": signals.get("mean_reversion_score", 0.0),
+                    "composite_signal": signals.get("composite_signal", 0.0),
+                    "signal_direction": signals.get("signal_direction"),
+                    "llm_override": cd.get("llm_override", False),
+                    "llm_reasoning": cd.get("llm_reasoning", ""),
+                }
+
                 side = Side.BUY if decision.action.value == "buy" else Side.SELL
                 limit_price = cd.get("limit_price", current_price)
 
@@ -102,6 +144,15 @@ class CryptoMomentumMonitor(BaseMonitor):
                 order_check = self.risk_manager.check_order(order, portfolio, current_price)
                 if not order_check.approved:
                     log.info(f"Crypto risk check rejected {decision.symbol}: {order_check.reason}")
+                    await self.repo.insert_agent_decision(
+                        agent_type="crypto_momentum",
+                        symbol=decision.symbol,
+                        action=side.value,
+                        confidence=decision.confidence,
+                        reasoning=f"Risk rejected: {order_check.reason}. Original: {decision.reasoning[:300]}",
+                        signals_json=json.dumps(decision_signals),
+                        outcome="rejected_risk",
+                    )
                     continue
                 if order_check.adjusted_quantity is not None:
                     order.quantity = order_check.adjusted_quantity
@@ -124,6 +175,16 @@ class CryptoMomentumMonitor(BaseMonitor):
                 )
                 await self.repo.insert_monitor_trade(
                     self.monitor_id, trade_id, current_price, order.quantity,
+                )
+                await self.repo.insert_agent_decision(
+                    agent_type="crypto_momentum",
+                    symbol=decision.symbol,
+                    action=side.value,
+                    confidence=decision.confidence,
+                    reasoning=decision.reasoning,
+                    signals_json=json.dumps({**decision_signals, "qty": order.quantity, "filled": trade_result.filled_price}),
+                    outcome="executed",
+                    trade_id=trade_id,
                 )
 
                 await self.event_bus.broadcast(WSEvent(

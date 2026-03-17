@@ -328,6 +328,7 @@ class WSEventType(str, Enum):
     STRATEGY_SIGNAL = "strategy_signal"
     MONITOR_STATUS = "monitor_status"
     SHORT_PROPOSAL = "short_proposal"
+    REGIME_UPDATE = "regime_update"
     ERROR = "error"
 
 

@@ -2,12 +2,26 @@
 
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, Depends, Request
 
 from trading_bot.api.deps import get_repo
 from trading_bot.db.repository import Repository
 
 router = APIRouter()
+
+
+@router.get("/crypto/decisions")
+async def get_crypto_decisions(
+    limit: int = 50,
+    symbol: str | None = None,
+    repo: Repository = Depends(get_repo),
+):
+    """Get recent crypto agent decisions from the decision log."""
+    return await repo.get_agent_decisions(
+        agent_type="crypto_momentum", limit=limit, symbol=symbol,
+    )
 
 
 @router.get("/crypto/signals")
@@ -65,11 +79,12 @@ async def trigger_crypto_scan(request: Request, repo: Repository = Depends(get_r
     portfolio = await broker.get_account()
     result = await strategy.scan(portfolio=portfolio)
 
-    # Log signals to DB
+    # Log signals + decisions to DB
     for cd in result.metadata.get("crypto_decisions", []):
         signals = cd.get("technical_signals", {})
+        sym = cd.get("symbol", "")
         await repo.insert_crypto_signal(
-            symbol=cd.get("symbol", ""),
+            symbol=sym,
             rsi_14=signals.get("rsi_14"),
             macd=signals.get("macd"),
             macd_signal=signals.get("macd_signal"),
@@ -82,11 +97,39 @@ async def trigger_crypto_scan(request: Request, repo: Repository = Depends(get_r
             llm_override=cd.get("llm_override", False),
             llm_reasoning=cd.get("llm_reasoning", ""),
         )
+        # Log decision
+        direction = signals.get("signal_direction", "hold")
+        await repo.insert_agent_decision(
+            agent_type="crypto_momentum",
+            symbol=sym,
+            action=direction,
+            confidence=min(0.95, abs(signals.get("composite_signal", 0))),
+            reasoning=cd.get("llm_reasoning", "") or f"Composite: {signals.get('composite_signal', 0):.3f}",
+            signals_json=json.dumps(signals),
+            outcome="scan_result",
+        )
+
+    # Log filtered symbols
+    for scanned in result.metadata.get("all_scanned", []):
+        sym = scanned.get("symbol", "")
+        if sym:
+            signals = scanned.get("technical_signals", {})
+            await repo.insert_agent_decision(
+                agent_type="crypto_momentum",
+                symbol=sym,
+                action="hold",
+                confidence=0.0,
+                reasoning=f"Filtered ({scanned.get('filtered_reason', 'unknown')})",
+                signals_json=json.dumps(signals),
+                outcome="filtered_signal",
+            )
 
     return {
         "symbols_scanned": result.metadata.get("symbols_scanned", 0),
         "signals_found": result.metadata.get("signals_found", 0),
         "decisions": [d.model_dump() for d in result.decisions],
+        "all_scanned": result.metadata.get("all_scanned", []),
+        "crypto_details": result.metadata.get("crypto_decisions", []),
     }
 
 

@@ -2,7 +2,7 @@ import { NavLink, Outlet } from 'react-router-dom';
 import {
   LayoutDashboard, LineChart, ArrowRightLeft, Globe,
   Radio, History, Settings, Wifi, WifiOff, Brain,
-  TrendingUp, Bitcoin,
+  TrendingUp, TrendingDown, Bitcoin, BarChart3, Shield, FlaskConical,
 } from 'lucide-react';
 import { useWebSocket } from '../hooks/useWebSocket';
 
@@ -14,6 +14,10 @@ const links = [
   { to: '/markets', icon: Globe, label: 'Markets' },
   { to: '/kalshi', icon: TrendingUp, label: 'Kalshi' },
   { to: '/crypto', icon: Bitcoin, label: 'Crypto' },
+  { to: '/shorts', icon: TrendingDown, label: 'Shorts' },
+  { to: '/analytics', icon: BarChart3, label: 'Analytics' },
+  { to: '/risk', icon: Shield, label: 'Risk' },
+  { to: '/backtest', icon: FlaskConical, label: 'Backtest' },
   { to: '/monitors', icon: Radio, label: 'Monitors' },
   { to: '/activity', icon: History, label: 'Activity' },
   { to: '/settings', icon: Settings, label: 'Settings' },

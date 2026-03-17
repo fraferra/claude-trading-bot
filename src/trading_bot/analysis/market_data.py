@@ -101,6 +101,61 @@ async def get_news(query: str, limit: int = 5) -> list[NewsItem]:
         return []
 
 
+async def web_search(query: str, max_results: int = 8) -> str:
+    """Perform a real web search using DuckDuckGo and return formatted results.
+
+    Returns a text block with titles, snippets, and sources — suitable for
+    inclusion in an LLM prompt as research context. Falls back to Google News
+    RSS if DuckDuckGo is unavailable.
+    """
+    results_text = ""
+
+    # --- Primary: DuckDuckGo text search (actual snippets) ---
+    try:
+        try:
+            from ddgs import DDGS
+        except ImportError:
+            from duckduckgo_search import DDGS
+
+        loop = asyncio.get_event_loop()
+        ddgs = DDGS()
+        # Run synchronous search in executor to avoid blocking
+        search_results = await loop.run_in_executor(
+            None,
+            lambda: list(ddgs.text(query, max_results=max_results, timelimit="w")),
+        )
+
+        if search_results:
+            parts = []
+            for r in search_results:
+                title = r.get("title", "")
+                body = r.get("body", "")
+                source = r.get("href", "")
+                parts.append(f"- [{title}] {body} (source: {source})")
+            results_text = "\n".join(parts)
+            log.info(f"Web search for '{query}': {len(search_results)} results from DuckDuckGo")
+    except Exception as e:
+        log.warning(f"DuckDuckGo search failed for '{query}': {e}")
+
+    # --- Also get Google News headlines for recency ---
+    try:
+        news_items = await get_news(query, limit=5)
+        if news_items:
+            news_parts = [f"- [NEWS: {n.source}] {n.title} ({n.published})" for n in news_items]
+            news_text = "\n".join(news_parts)
+            if results_text:
+                results_text = results_text + "\n\nLatest news headlines:\n" + news_text
+            else:
+                results_text = news_text
+    except Exception:
+        pass
+
+    if not results_text:
+        results_text = "No search results found. Exercise caution — you may lack current information."
+
+    return results_text
+
+
 async def get_polymarket_data(condition_id: str) -> PolymarketData:
     """Fetch market data from Polymarket's public API."""
     url = f"https://clob.polymarket.com/markets/{condition_id}"

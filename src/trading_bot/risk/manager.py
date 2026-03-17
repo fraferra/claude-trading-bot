@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from trading_bot.config import RiskConfig
+from trading_bot.config import RiskConfig, ShortConfig
 from trading_bot.models import (
     OrderRequest,
     PortfolioSummary,
@@ -148,6 +148,159 @@ class RiskManager:
         raw_size = portfolio_equity * capped
         max_from_risk = portfolio_equity * self.config.max_position_pct
         return round(min(raw_size, max_size_usd, max_from_risk), 2)
+
+    def check_short_order(
+        self,
+        order: OrderRequest,
+        portfolio: PortfolioSummary,
+        current_price: float,
+        short_config: ShortConfig,
+    ) -> RiskCheckResult:
+        """Run risk checks specific to a short sell order."""
+        # 1. Daily trade count limit
+        today = date.today()
+        count = self._trades_today.get(today, 0)
+        if count >= self.config.max_trades_per_day:
+            return RiskCheckResult(
+                approved=False,
+                reason=f"Daily trade limit reached ({self.config.max_trades_per_day} trades)",
+            )
+
+        # 2. Daily loss limit
+        if portfolio.equity > 0:
+            daily_loss_pct = -portfolio.daily_pnl / portfolio.equity
+            if daily_loss_pct >= self.config.daily_loss_limit_pct:
+                return RiskCheckResult(
+                    approved=False,
+                    reason=f"Daily loss limit reached ({daily_loss_pct:.1%})",
+                )
+
+        # 3. Single short position size limit
+        order_value = order.quantity * current_price
+        max_single = portfolio.equity * short_config.max_single_short_pct
+        if order_value > max_single:
+            max_qty = max_single / current_price if current_price > 0 else 0
+            if max_qty <= 0:
+                return RiskCheckResult(
+                    approved=False,
+                    reason=f"Short position exceeds single-name limit ({short_config.max_single_short_pct:.0%})",
+                )
+            return RiskCheckResult(
+                approved=True,
+                reason=f"Short reduced to {max_qty:.2f} shares ({short_config.max_single_short_pct:.0%} limit)",
+                adjusted_quantity=max_qty,
+            )
+
+        # 4. Total short exposure limit
+        total_short_value = sum(
+            abs(p.market_value) for p in portfolio.positions if p.quantity < 0
+        )
+        max_short_exposure = portfolio.equity * short_config.max_short_exposure_pct
+        if total_short_value + order_value > max_short_exposure:
+            remaining = max_short_exposure - total_short_value
+            max_qty = remaining / current_price if current_price > 0 else 0
+            if max_qty <= 0:
+                return RiskCheckResult(
+                    approved=False,
+                    reason=f"Total short exposure at max ({short_config.max_short_exposure_pct:.0%})",
+                )
+            return RiskCheckResult(
+                approved=True,
+                reason=f"Short reduced to {max_qty:.2f} shares (total exposure limit)",
+                adjusted_quantity=max_qty,
+            )
+
+        return RiskCheckResult(approved=True)
+
+    def calculate_short_position_size(
+        self,
+        portfolio_equity: float,
+        current_price: float,
+        atr: float,
+        short_config: ShortConfig,
+    ) -> float:
+        """Calculate short position size using ATR-based risk.
+
+        risk_amount = equity * risk_per_trade_pct
+        shares = risk_amount / (ATR * stop_multiplier)
+        Capped at max_single_short_pct of equity.
+        """
+        if current_price <= 0 or atr <= 0:
+            return 0.0
+
+        risk_amount = portfolio_equity * short_config.risk_per_trade_pct
+        stop_distance = atr * short_config.stop_atr_multiplier
+        shares = risk_amount / stop_distance
+
+        # Cap at max single short position
+        max_value = portfolio_equity * short_config.max_single_short_pct
+        max_shares = max_value / current_price
+        shares = min(shares, max_shares)
+
+        return round(shares, 2)
+
+    def check_correlation(
+        self,
+        symbol: str,
+        existing_symbols: list[str],
+        max_correlation: float = 0.85,
+    ) -> RiskCheckResult:
+        """Check if a new symbol is too correlated with existing positions."""
+        if not existing_symbols:
+            return RiskCheckResult(approved=True)
+
+        try:
+            import yfinance as yf
+
+            all_symbols = [symbol] + existing_symbols[:10]
+            data = yf.download(all_symbols, period="3mo", progress=False)["Close"]
+            if data.empty or symbol not in data.columns:
+                return RiskCheckResult(approved=True)
+
+            returns = data.pct_change().dropna()
+            if symbol not in returns.columns:
+                return RiskCheckResult(approved=True)
+
+            for other in existing_symbols:
+                if other in returns.columns:
+                    corr = float(returns[symbol].corr(returns[other]))
+                    if abs(corr) > max_correlation:
+                        return RiskCheckResult(
+                            approved=False,
+                            reason=f"{symbol} has {corr:.0%} correlation with {other} (max {max_correlation:.0%})",
+                        )
+        except Exception as e:
+            log.debug(f"Correlation check skipped: {e}")
+
+        return RiskCheckResult(approved=True)
+
+    def check_earnings_proximity(
+        self,
+        symbol: str,
+        min_days_before_earnings: int = 2,
+    ) -> RiskCheckResult:
+        """Check if a stock has earnings coming up soon."""
+        try:
+            import yfinance as yf
+            from datetime import datetime as dt
+
+            ticker = yf.Ticker(symbol)
+            cal = ticker.calendar
+            if cal is not None and not cal.empty:
+                earnings_date = cal.iloc[0, 0] if len(cal.columns) > 0 else None
+                if earnings_date:
+                    if hasattr(earnings_date, 'date'):
+                        earnings_date = earnings_date.date()
+                    days_until = (earnings_date - dt.now().date()).days
+                    if 0 <= days_until <= min_days_before_earnings:
+                        return RiskCheckResult(
+                            approved=False,
+                            reason=f"{symbol} has earnings in {days_until} day(s) — skipping",
+                        )
+        except Exception as e:
+            log.debug(f"Earnings check skipped for {symbol}: {e}")
+
+        return RiskCheckResult(approved=True)
 
     def record_trade(self) -> None:
         """Record that a trade was executed today."""

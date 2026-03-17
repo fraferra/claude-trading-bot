@@ -133,7 +133,69 @@ class KalshiConfig:
     categories: list[str] = field(default_factory=lambda: [
         "politics", "economics", "science", "climate", "finance",
     ])
+    max_days_until_close: int = 90  # Only trade markets closing within N days
     enabled: bool = True
+
+
+@dataclass
+class KalshiArbConfig:
+    scan_interval_minutes: int = 10
+    min_edge_pct: float = 0.03        # 3% net edge after fees
+    fee_estimate_pct: float = 0.01    # 1% per leg
+    max_events_to_scan: int = 200
+    min_markets: int = 3              # Min legs for a MECE arb event
+    max_markets: int = 15             # Skip events with too many buckets
+    max_size_per_leg_usd: float = 50.0
+    max_total_exposure_usd: float = 300.0
+    enabled: bool = True
+
+
+@dataclass
+class ShortConfig:
+    enabled: bool = True
+    scan_interval_minutes: int = 60
+    watchlist: list[str] = field(default_factory=list)  # empty = broad market scan
+    min_short_score: float = -0.4
+    max_short_exposure_pct: float = 0.30
+    max_single_short_pct: float = 0.05
+    risk_per_trade_pct: float = 0.005
+    stop_atr_multiplier: float = 2.5
+    proposal_expiry_hours: int = 24
+    broad_market_scan: bool = True     # scan full market, not just watchlist
+    prefilter_rsi_min: float = 65.0    # pre-filter: RSI(14) above this
+    prefilter_near_high_pct: float = 0.95  # pre-filter: price > X% of 52w high
+    max_prefilter_candidates: int = 40 # max candidates after pre-filter
+
+
+@dataclass
+class DrawdownAccumulationConfig:
+    enabled: bool = True
+    scan_interval_minutes: int = 60
+    watchlist: list[str] = field(default_factory=lambda: ["TQQQ", "SOXL", "UPRO"])
+    normal_buy_usd: float = 300.0           # DCA buy in normal conditions
+    drawdown_buy_usd: float = 1500.0        # Aggressive buy during drawdowns
+    drawdown_threshold_pct: float = 25.0     # Drawdown % to trigger aggressive buys
+    min_days_between_buys: int = 7           # Cooldown: normal buys
+    min_days_between_drawdown_buys: int = 5  # Cooldown: drawdown buys
+    drawdown_lookback_days: int = 252        # Period for max drawdown calculation
+    profit_take_pct: float = 50.0            # Sell partial when up this %
+    profit_take_fraction: float = 0.25       # Sell this fraction on profit-take
+    max_portfolio_pct: float = 0.30          # Max % of portfolio in this strategy
+
+
+@dataclass
+class RegimeConfig:
+    """Configuration for the OU-based market regime classifier."""
+    enabled: bool = True
+    scan_interval_minutes: int = 60
+    lookback_bars: int = 200            # Daily bars fetched (~6.5 months)
+    autocorr_window: int = 60           # Bars used for lag-1 autocorrelation
+    vol_window: int = 30                # Bars per rolling realized-vol estimate
+    trend_threshold: float = 0.08       # Min |ρ| to declare trending/mean-reverting
+    vol_high_pct: float = 0.75          # Vol-percentile threshold for HIGH_VOLATILITY
+    vol_low_pct: float = 0.25           # Vol-percentile threshold for LOW_VOLATILITY
+    # Empty list → falls back to crypto.watchlist
+    symbols: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -155,6 +217,31 @@ class CryptoConfig:
     max_size_usd: float = 1000.0
     llm_confirmation_enabled: bool = True
     enabled: bool = True
+
+
+@dataclass
+class PositionGuardConfig:
+    enabled: bool = True
+    scan_interval_minutes: int = 5
+    stop_loss_pct: float = 8.0          # Sell if position down X%
+    trailing_stop_pct: float = 12.0     # Trailing stop from peak
+    take_profit_pct: float = 25.0       # Sell if position up X%
+    partial_take_profit: bool = True    # Sell partial at TP instead of full
+    partial_take_fraction: float = 0.50 # Fraction to sell at TP
+    exclude_symbols: list[str] = field(default_factory=list)
+    enable_for_shorts: bool = True
+
+
+@dataclass
+class TelegramConfig:
+    enabled: bool = False
+    bot_token: str = ""
+    chat_id: str = ""
+    notify_trades: bool = True
+    notify_errors: bool = True
+    notify_stop_loss: bool = True
+    daily_summary: bool = True
+    daily_summary_hour: int = 17
 
 
 @dataclass
@@ -192,7 +279,13 @@ class Config:
     monitors: MonitorConfig = field(default_factory=MonitorConfig)
     research_agent: ResearchAgentConfig = field(default_factory=ResearchAgentConfig)
     kalshi: KalshiConfig = field(default_factory=KalshiConfig)
+    kalshi_arb: KalshiArbConfig = field(default_factory=KalshiArbConfig)
     crypto: CryptoConfig = field(default_factory=CryptoConfig)
+    regime: RegimeConfig = field(default_factory=RegimeConfig)
+    shorts: ShortConfig = field(default_factory=ShortConfig)
+    drawdown_accumulation: DrawdownAccumulationConfig = field(default_factory=DrawdownAccumulationConfig)
+    position_guard: PositionGuardConfig = field(default_factory=PositionGuardConfig)
+    telegram: TelegramConfig = field(default_factory=TelegramConfig)
     auth: AuthConfig = field(default_factory=AuthConfig)
     server: ServerConfig = field(default_factory=ServerConfig)
     anthropic_api_key: str = ""
@@ -227,6 +320,11 @@ def load_config(config_path: str | Path | None = None) -> Config:
     cfg.kalshi.private_key = os.getenv("KALSHI_PRIVATE_KEY", "")
     if os.getenv("KALSHI_DEMO") is not None:
         cfg.kalshi.demo = os.getenv("KALSHI_DEMO", "true").lower() in ("true", "1", "yes")
+
+    cfg.telegram.bot_token = os.getenv("TELEGRAM_BOT_TOKEN", cfg.telegram.bot_token)
+    cfg.telegram.chat_id = os.getenv("TELEGRAM_CHAT_ID", cfg.telegram.chat_id)
+    if cfg.telegram.bot_token and cfg.telegram.chat_id:
+        cfg.telegram.enabled = True
 
     cfg.auth.username = os.getenv("AUTH_USERNAME", "")
     cfg.auth.password = os.getenv("AUTH_PASSWORD", "")
@@ -306,10 +404,40 @@ def _apply_yaml(cfg: Config, raw: dict) -> None:
             if hasattr(cfg.kalshi, k):
                 setattr(cfg.kalshi, k, v)
 
+    if "kalshi_arb" in raw:
+        for k, v in raw["kalshi_arb"].items():
+            if hasattr(cfg.kalshi_arb, k):
+                setattr(cfg.kalshi_arb, k, v)
+
     if "crypto" in raw:
         for k, v in raw["crypto"].items():
             if hasattr(cfg.crypto, k):
                 setattr(cfg.crypto, k, v)
+
+    if "regime" in raw:
+        for k, v in raw["regime"].items():
+            if hasattr(cfg.regime, k):
+                setattr(cfg.regime, k, v)
+
+    if "shorts" in raw:
+        for k, v in raw["shorts"].items():
+            if hasattr(cfg.shorts, k):
+                setattr(cfg.shorts, k, v)
+
+    if "drawdown_accumulation" in raw:
+        for k, v in raw["drawdown_accumulation"].items():
+            if hasattr(cfg.drawdown_accumulation, k):
+                setattr(cfg.drawdown_accumulation, k, v)
+
+    if "position_guard" in raw:
+        for k, v in raw["position_guard"].items():
+            if hasattr(cfg.position_guard, k):
+                setattr(cfg.position_guard, k, v)
+
+    if "telegram" in raw:
+        for k, v in raw["telegram"].items():
+            if hasattr(cfg.telegram, k):
+                setattr(cfg.telegram, k, v)
 
     if "auth" in raw:
         for k, v in raw["auth"].items():

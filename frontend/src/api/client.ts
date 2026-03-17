@@ -69,6 +69,15 @@ export const api = {
     request<any[]>(`/history/stock-scores${symbol ? `?symbol=${symbol}` : ''}`),
   getCumulativePnl: () => request<Record<string, any[]>>('/history/cumulative-pnl'),
 
+  // Analytics
+  getPerformance: (platform?: string) =>
+    request<any>(`/analytics/performance${platform ? `?platform=${platform}` : ''}`),
+  getRiskMetrics: () => request<any>('/analytics/risk'),
+  getCalendarReturns: () => request<any[]>('/analytics/calendar'),
+  getCorrelation: () => request<any>('/analytics/correlation'),
+  checkEarnings: (symbols: string) =>
+    request<any>(`/analytics/earnings-check?symbols=${encodeURIComponent(symbols)}`),
+
   // Config
   getConfig: () => request<any>('/config'),
   updateConfig: (data: any) =>
@@ -116,4 +125,8 @@ export const api = {
   rejectShort: (id: number) =>
     request<any>(`/shorts/${id}/reject`, { method: 'POST' }),
   scanShorts: () => request<any>('/shorts/scan', { method: 'POST' }),
+
+  // Backtest
+  runBacktest: (params: Record<string, any>) =>
+    request<any>('/backtest/run', { method: 'POST', body: JSON.stringify(params) }),
 };

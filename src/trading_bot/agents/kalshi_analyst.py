@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
+import re
 
 from trading_bot.agents.kalshi_prompts import KALSHI_PROBABILITY_SYSTEM, KALSHI_PROBABILITY_USER
 from trading_bot.analysis.llm_analyst import LLMAnalyst
-from trading_bot.analysis.market_data import get_news
+from trading_bot.analysis.market_data import web_search
 from trading_bot.config import Config
 from trading_bot.models import (
     Action,
@@ -33,15 +34,12 @@ class KalshiAnalystAgent:
         self, market: KalshiMarketData
     ) -> KalshiProbabilityEstimate:
         """Use LLM to estimate true probability, compute edge and Kelly sizing."""
-        # Gather relevant news
+        # Gather real-time research via web search (headlines + article snippets)
         search_query = market.title[:80]
         try:
-            news = await get_news(search_query, limit=5)
-            news_text = "\n".join(
-                f"- [{n.source}] {n.title}" for n in news
-            ) if news else "No recent news found."
+            news_text = await web_search(search_query, max_results=8)
         except Exception:
-            news_text = "News unavailable."
+            news_text = "Web search unavailable — exercise caution."
 
         user_msg = KALSHI_PROBABILITY_USER.format(
             question=market.title,
@@ -57,14 +55,30 @@ class KalshiAnalystAgent:
         try:
             raw = await self.analyst._call_llm_raw(KALSHI_PROBABILITY_SYSTEM, user_msg)
 
-            # Parse response
+            # Parse response — try multiple extraction strategies
             json_str = raw.strip()
             if json_str.startswith("```"):
                 lines = json_str.split("\n")
                 end = -1 if lines[-1].strip() == "```" else len(lines)
                 json_str = "\n".join(lines[1:end])
 
-            data = json.loads(json_str)
+            data = None
+            try:
+                data = json.loads(json_str)
+            except json.JSONDecodeError:
+                # Try to extract JSON object from mixed text response
+                match = re.search(r'\{[^{}]*"probability"[^{}]*\}', raw, re.DOTALL)
+                if match:
+                    data = json.loads(match.group())
+                else:
+                    log.warning(
+                        f"Kalshi LLM response for {market.ticker} is not JSON "
+                        f"(first 200 chars): {raw[:200]}"
+                    )
+                    raise ValueError(f"No valid JSON found in LLM response")
+
+            if data is None:
+                raise ValueError("Parsed data is None")
             ai_prob = float(data.get("probability", market.yes_price))
             edge = ai_prob - market.yes_price
 

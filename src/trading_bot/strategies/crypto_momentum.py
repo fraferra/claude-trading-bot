@@ -7,10 +7,12 @@ import json
 from trading_bot.agents.crypto_prompts import CRYPTO_CONFIRMATION_SYSTEM, CRYPTO_CONFIRMATION_USER
 from trading_bot.analysis.crypto_data import compute_crypto_technicals, get_crypto_bars
 from trading_bot.analysis.llm_analyst import LLMAnalyst
+from trading_bot.analysis.regime_classifier import REGIME_PARAMS, get_regime
 from trading_bot.config import Config
 from trading_bot.models import (
     Action,
     CryptoTradeDecision,
+    MarketRegime,
     OrderType,
     PortfolioSummary,
     StrategyResult,
@@ -43,6 +45,7 @@ class CryptoMomentumStrategy(BaseStrategy):
         symbols = symbols or self.crypto_cfg.watchlist
         decisions: list[TradeDecision] = []
         crypto_decisions: list[CryptoTradeDecision] = []
+        all_scanned: list[dict] = []  # All symbols including filtered ones
 
         for symbol in symbols:
             try:
@@ -61,6 +64,21 @@ class CryptoMomentumStrategy(BaseStrategy):
                         ),
                         suggested_size_usd=decision.suggested_size_usd,
                     ))
+                elif decision and decision.action == Action.HOLD:
+                    # LLM vetoed or action changed to hold
+                    all_scanned.append({
+                        "symbol": symbol,
+                        "technical_signals": decision.technical_signals.model_dump(mode="json"),
+                        "filtered_reason": "llm_vetoed" if decision.llm_override else "hold_signal",
+                        "llm_reasoning": decision.llm_reasoning or "",
+                    })
+                else:
+                    # Signal too weak or not enough data — include basic info
+                    all_scanned.append({
+                        "symbol": symbol,
+                        "technical_signals": {},
+                        "filtered_reason": "weak_signal_or_insufficient_data",
+                    })
             except Exception as e:
                 log.warning(f"Crypto scan failed for {symbol}: {e}")
 
@@ -71,6 +89,7 @@ class CryptoMomentumStrategy(BaseStrategy):
                 "symbols_scanned": len(symbols),
                 "signals_found": len(crypto_decisions),
                 "crypto_decisions": [d.model_dump(mode="json") for d in crypto_decisions],
+                "all_scanned": all_scanned,
             },
         )
 
@@ -91,16 +110,50 @@ class CryptoMomentumStrategy(BaseStrategy):
             log.debug(f"Not enough bars for {symbol}: {len(bars)}")
             return None
 
+        # --- Regime gating ---
+        regime_state = get_regime(symbol)
+        if regime_state is not None:
+            rp = REGIME_PARAMS[regime_state.regime]
+            mom_w = rp["momentum_weight"]
+            mr_w = rp["mean_rev_weight"]
+            min_score = self.crypto_cfg.min_signal_score * rp["min_signal_multiplier"]
+            size_multiplier = rp["position_size_multiplier"]
+            log.debug(
+                f"[regime] {symbol}: {regime_state.regime.value} | "
+                f"min_score={min_score:.3f} size_mult={size_multiplier:.2f}"
+            )
+        else:
+            mom_w, mr_w = 0.5, 0.5
+            min_score = self.crypto_cfg.min_signal_score
+            size_multiplier = 1.0
+
         # Compute technical indicators
         signals = compute_crypto_technicals(bars, self.crypto_cfg)
 
+        # Re-weight composite signal based on regime
+        if regime_state is not None:
+            regime_composite = max(
+                -1.0,
+                min(1.0, mom_w * signals.momentum_score + mr_w * signals.mean_reversion_score),
+            )
+            # Patch the composite_signal on the signals object so LLM sees the adjusted value
+            signals.composite_signal = round(regime_composite, 4)
+            if regime_composite >= min_score:
+                signals.signal_direction = Action.BUY
+            elif regime_composite <= -min_score:
+                signals.signal_direction = Action.SELL
+            else:
+                signals.signal_direction = Action.HOLD
+
         # Check if signal is strong enough
-        if abs(signals.composite_signal) < self.crypto_cfg.min_signal_score:
+        if abs(signals.composite_signal) < min_score:
             return None
 
         # Base decision from technicals
         confidence = min(0.95, abs(signals.composite_signal))
-        size_usd = self._calculate_position_size(confidence, portfolio, signals.current_price)
+        size_usd = self._calculate_position_size(
+            confidence, portfolio, signals.current_price, size_multiplier
+        )
 
         # Compute limit price with slight offset for better fills
         if signals.signal_direction == Action.BUY:
@@ -110,6 +163,7 @@ class CryptoMomentumStrategy(BaseStrategy):
         else:
             limit_price = signals.current_price
 
+        regime_label = regime_state.regime.value if regime_state else MarketRegime.LOW_VOLATILITY.value
         decision = CryptoTradeDecision(
             symbol=symbol,
             action=signals.signal_direction,
@@ -118,6 +172,7 @@ class CryptoMomentumStrategy(BaseStrategy):
             suggested_size_usd=size_usd,
             order_type=OrderType.LIMIT,
             limit_price=limit_price,
+            llm_reasoning=f"[regime:{regime_label}]",
         )
 
         # Optional LLM confirmation
@@ -210,13 +265,13 @@ class CryptoMomentumStrategy(BaseStrategy):
         confidence: float,
         portfolio: PortfolioSummary | None,
         current_price: float,
+        regime_size_multiplier: float = 1.0,
     ) -> float:
-        """Crypto-specific position sizing."""
+        """Crypto-specific position sizing, optionally scaled by regime."""
         if portfolio is None or portfolio.equity <= 0:
             return 0.0
 
-        # Base size: percentage of equity scaled by confidence
         base_pct = self.crypto_cfg.max_position_pct * confidence
-        raw_size = portfolio.equity * base_pct
+        raw_size = portfolio.equity * base_pct * regime_size_multiplier
 
-        return min(raw_size, self.crypto_cfg.max_size_usd)
+        return min(raw_size, self.crypto_cfg.max_size_usd * regime_size_multiplier)

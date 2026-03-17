@@ -80,6 +80,34 @@ kalshi:
     - science
     - climate
     - finance
+  max_days_until_close: 90    # Only trade markets closing within 90 days
+
+# Kalshi MECE arbitrage (pure math, no LLM)
+# Targets range/bucket events (Fed rate, CPI, etc.) where sum of YES prices != $1.00
+kalshi_arb:
+  enabled: true
+  scan_interval_minutes: 10
+  min_edge_pct: 0.03          # 3% net edge after fees
+  fee_estimate_pct: 0.01      # ~1% per leg
+  max_events_to_scan: 200
+  min_markets: 3              # Min legs for a MECE event
+  max_markets: 15             # Skip events with too many buckets
+  max_size_per_leg_usd: 50.0  # $50 per leg
+  max_total_exposure_usd: 300.0  # Max $300 total per cycle
+
+# OU-based market regime classifier
+# Fits an Ornstein-Uhlenbeck process to daily crypto bars.
+# Results gate signal thresholds and position sizes in crypto_momentum.
+regime:
+  enabled: true
+  scan_interval_minutes: 60      # Re-classify every hour
+  lookback_bars: 200             # Daily bars fetched (~6.5 months)
+  autocorr_window: 60            # Bars for lag-1 autocorrelation
+  vol_window: 30                 # Bars per rolling realized-vol estimate
+  trend_threshold: 0.08          # Min |ρ| to declare trending/mean-reverting
+  vol_high_pct: 0.75             # Vol percentile → HIGH_VOLATILITY
+  vol_low_pct: 0.25              # Vol percentile → LOW_VOLATILITY
+  symbols: []                    # Empty = use crypto.watchlist
 
 # Crypto momentum strategy
 crypto:
@@ -97,6 +125,61 @@ crypto:
   max_total_exposure_pct: 0.50
   max_size_usd: 1000.0
   llm_confirmation_enabled: true
+
+# Short selling (human-in-the-loop)
+shorts:
+  enabled: true
+  scan_interval_minutes: 60
+  watchlist: []                    # Empty = broad market scan (S&P 500 + NASDAQ-100)
+  min_short_score: -0.4            # More negative = stronger signal needed
+  max_short_exposure_pct: 0.30     # Max 30% of portfolio in shorts
+  max_single_short_pct: 0.05       # Max 5% per short position
+  risk_per_trade_pct: 0.005        # 0.5% risk per trade
+  stop_atr_multiplier: 2.5         # Stop loss = entry + 2.5x ATR
+  proposal_expiry_hours: 24        # Proposals expire after 24h
+  broad_market_scan: true          # Scan full S&P 500 + NASDAQ-100
+  prefilter_rsi_min: 65.0          # Pre-filter: RSI(14) above this
+  prefilter_near_high_pct: 0.95    # Pre-filter: price > 95% of 3-month high
+  max_prefilter_candidates: 40     # Max candidates after pre-filter
+
+# Drawdown-based accumulation (leveraged ETFs)
+drawdown_accumulation:
+  enabled: true
+  scan_interval_minutes: 60
+  watchlist:
+    - TQQQ                          # 3x NASDAQ-100
+    - SOXL                          # 3x Semiconductors
+    - UPRO                          # 3x S&P 500
+  normal_buy_usd: 300.0             # Small DCA buy in normal conditions
+  drawdown_buy_usd: 1500.0          # Aggressive buy when drawdown >= threshold
+  drawdown_threshold_pct: 25.0      # 252-day drawdown % to trigger aggressive buys
+  min_days_between_buys: 7          # Cooldown between normal buys
+  min_days_between_drawdown_buys: 5 # Cooldown between drawdown buys
+  drawdown_lookback_days: 252       # ~1 year lookback for max drawdown
+  profit_take_pct: 50.0             # Take profit when position up 50%+
+  profit_take_fraction: 0.25        # Sell 25% of position on profit-take
+  max_portfolio_pct: 0.30           # Max 30% of portfolio in this strategy
+
+# Position guard (auto stop-loss, trailing stop, take-profit)
+position_guard:
+  enabled: true
+  scan_interval_minutes: 5
+  stop_loss_pct: 8.0             # Hard stop: sell if down 8%
+  trailing_stop_pct: 12.0        # Trailing stop from peak price
+  take_profit_pct: 25.0          # Take profit when up 25%
+  partial_take_profit: true      # Sell partial at TP (not full position)
+  partial_take_fraction: 0.50    # Sell 50% of position at TP
+  exclude_symbols: []            # Symbols to skip (e.g., TQQQ managed by drawdown strategy)
+  enable_for_shorts: true
+
+# Telegram notifications (set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID env vars)
+telegram:
+  enabled: false
+  notify_trades: true
+  notify_errors: true
+  notify_stop_loss: true
+  daily_summary: true
+  daily_summary_hour: 17
 
 # Autonomous research agent
 research_agent:

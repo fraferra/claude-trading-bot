@@ -15,6 +15,7 @@ const MONITOR_TYPES = [
   { id: 'crypto_momentum', label: 'Crypto Momentum', desc: '15-min crypto momentum/mean-reversion strategy' },
   { id: 'short_candidate', label: 'Short Candidate', desc: 'Scan for short selling candidates (human approval required)' },
   { id: 'drawdown_accumulation', label: 'Drawdown Accumulation', desc: 'DCA into leveraged ETFs with aggressive drawdown buying' },
+  { id: 'position_guard', label: 'Position Guard', desc: 'Stop-loss, trailing stops & take-profit for all positions' },
 ];
 
 export default function Monitors() {

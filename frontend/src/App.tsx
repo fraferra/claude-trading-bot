@@ -11,6 +11,10 @@ import SettingsPage from './pages/SettingsPage';
 import ResearchAgent from './pages/ResearchAgent';
 import Kalshi from './pages/Kalshi';
 import Crypto from './pages/Crypto';
+import Shorts from './pages/Shorts';
+import Analytics from './pages/Analytics';
+import RiskDashboard from './pages/RiskDashboard';
+import Backtest from './pages/Backtest';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -35,6 +39,10 @@ export default function App() {
             <Route path="/markets" element={<Markets />} />
             <Route path="/kalshi" element={<Kalshi />} />
             <Route path="/crypto" element={<Crypto />} />
+            <Route path="/shorts" element={<Shorts />} />
+            <Route path="/analytics" element={<Analytics />} />
+            <Route path="/risk" element={<RiskDashboard />} />
+            <Route path="/backtest" element={<Backtest />} />
             <Route path="/monitors" element={<Monitors />} />
             <Route path="/activity" element={<Activity />} />
             <Route path="/settings" element={<SettingsPage />} />

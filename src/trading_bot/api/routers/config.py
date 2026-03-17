@@ -40,6 +40,20 @@ class ConfigUpdate(BaseModel):
     run: dict | None = None
     stock_scorer: dict | None = None
     monitors: dict | None = None
+    kalshi: dict | None = None
+    crypto: dict | None = None
+    shorts: dict | None = None
+    drawdown_accumulation: dict | None = None
+    position_guard: dict | None = None
+    telegram: dict | None = None
+    research_agent: dict | None = None
+
+
+_CONFIG_SECTIONS = [
+    "risk", "stocks", "run", "stock_scorer", "monitors",
+    "kalshi", "crypto", "shorts", "drawdown_accumulation",
+    "position_guard", "telegram", "research_agent",
+]
 
 
 @router.get("/config")
@@ -52,25 +66,13 @@ async def update_config(
     update: ConfigUpdate,
     config: Config = Depends(get_config),
 ):
-    if update.risk:
-        for k, v in update.risk.items():
-            if hasattr(config.risk, k):
-                setattr(config.risk, k, v)
-    if update.stocks:
-        for k, v in update.stocks.items():
-            if hasattr(config.stocks, k):
-                setattr(config.stocks, k, v)
-    if update.run:
-        for k, v in update.run.items():
-            if hasattr(config.run, k):
-                setattr(config.run, k, v)
-    if update.stock_scorer:
-        for k, v in update.stock_scorer.items():
-            if hasattr(config.stock_scorer, k):
-                setattr(config.stock_scorer, k, v)
-    if update.monitors:
-        for k, v in update.monitors.items():
-            if hasattr(config.monitors, k):
-                setattr(config.monitors, k, v)
+    for section_name in _CONFIG_SECTIONS:
+        update_data = getattr(update, section_name, None)
+        if update_data:
+            section = getattr(config, section_name, None)
+            if section:
+                for k, v in update_data.items():
+                    if hasattr(section, k):
+                        setattr(section, k, v)
 
     return _safe_config(config)

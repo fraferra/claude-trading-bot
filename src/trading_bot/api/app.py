@@ -114,7 +114,7 @@ def create_app(config: Config | None = None) -> FastAPI:
         trade,
     )
 
-    from trading_bot.api.routers import crypto, kalshi, research_agent
+    from trading_bot.api.routers import analytics, backtest, crypto, kalshi, research_agent, shorts
 
     app.include_router(portfolio.router, prefix="/api", tags=["portfolio"])
     app.include_router(analysis.router, prefix="/api", tags=["analysis"])
@@ -127,6 +127,9 @@ def create_app(config: Config | None = None) -> FastAPI:
     app.include_router(research_agent.router, prefix="/api", tags=["research_agent"])
     app.include_router(kalshi.router, prefix="/api", tags=["kalshi"])
     app.include_router(crypto.router, prefix="/api", tags=["crypto"])
+    app.include_router(shorts.router, prefix="/api", tags=["shorts"])
+    app.include_router(analytics.router, prefix="/api", tags=["analytics"])
+    app.include_router(backtest.router, prefix="/api", tags=["backtest"])
 
     # WebSocket endpoint
     from trading_bot.api.routers.ws import router as ws_router
