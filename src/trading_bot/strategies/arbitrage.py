@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import date, datetime
+
 from trading_bot.analysis.market_data import get_all_events, parse_event_to_model
 from trading_bot.config import Config
 from trading_bot.models import (
@@ -65,6 +67,20 @@ class ArbitrageScanner(BaseStrategy):
             },
         )
 
+    def _days_to_resolution(self, end_date_str: str | None) -> int | None:
+        """Parse event end_date and return days until resolution."""
+        if not end_date_str:
+            return None
+        try:
+            if "T" in end_date_str:
+                dt = datetime.fromisoformat(end_date_str.replace("Z", "+00:00"))
+                return max(0, (dt.date() - date.today()).days)
+            else:
+                d = date.fromisoformat(end_date_str[:10])
+                return max(0, (d - date.today()).days)
+        except Exception:
+            return None
+
     def _check_event(self, event: EventData) -> ArbitrageOpportunity | None:
         outcomes = event.outcomes
 
@@ -72,6 +88,17 @@ class ArbitrageScanner(BaseStrategy):
             return None
         if len(outcomes) > self.arb_config.max_outcomes:
             return None
+
+        # Time-window filter (only active when > 0)
+        min_days = self.arb_config.min_days_to_resolution
+        max_days = self.arb_config.max_days_to_resolution
+        if min_days > 0 or max_days > 0:
+            days = self._days_to_resolution(event.end_date)
+            if days is not None:
+                if min_days > 0 and days < min_days:
+                    return None
+                if max_days > 0 and days > max_days:
+                    return None
 
         # Filter out outcomes with zero liquidity
         valid_outcomes = [o for o in outcomes if o.liquidity > 0 and o.yes_price > 0]

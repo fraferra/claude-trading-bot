@@ -53,6 +53,8 @@ strategies:
     fee_estimate_pct: 0.01      # 1% estimated fee per leg
     max_events_to_scan: 200
     max_size_per_leg_usd: 500.0
+    min_days_to_resolution: 0   # 0 = no minimum
+    max_days_to_resolution: 0   # 0 = no limit (set >0 to focus on short-term)
   cross_market:
     min_edge_pct: 0.03          # 3% minimum divergence
     max_markets_per_batch: 20   # Batch size for LLM calls
@@ -186,6 +188,31 @@ position_guard:
   partial_take_fraction: 0.50    # Sell 50% of position at TP
   exclude_symbols: []            # Symbols to skip (e.g., TQQQ managed by drawdown strategy)
   enable_for_shorts: true
+
+# Weather forecast arbitrage (NOAA data vs Polymarket weather markets)
+weather_arb:
+  enabled: true
+  scan_interval_minutes: 30     # Scan every 30 minutes
+  min_edge_pct: 0.08            # 8% edge between NOAA and market required
+  max_days_to_resolution: 7     # Only trade markets resolving within 7 days
+  min_days_to_resolution: 1     # Skip markets expiring today
+  max_size_usd: 100.0           # $100 max per position
+  max_total_exposure_usd: 500.0 # $500 max total weather exposure
+  min_volume_usd: 1000.0        # Skip markets with < $1K liquidity
+  cities:                       # Cities to match against NOAA forecasts
+    - new york
+    - los angeles
+    - chicago
+    - houston
+    - phoenix
+    - seattle
+    - miami
+    - boston
+    - dallas
+    - denver
+    - san francisco
+    - atlanta
+    - washington dc
 
 # Telegram notifications (set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID env vars)
 telegram:

@@ -65,6 +65,26 @@ class ArbitrageConfig:
     min_outcomes: int = 2
     max_outcomes: int = 20
     max_size_per_leg_usd: float = 500.0
+    min_days_to_resolution: int = 0   # 0 = no minimum
+    max_days_to_resolution: int = 0   # 0 = no maximum (set >0 to filter)
+
+
+@dataclass
+class WeatherArbConfig:
+    """Weather forecast arbitrage: NOAA data vs Polymarket weather markets."""
+    enabled: bool = True
+    scan_interval_minutes: int = 30
+    min_edge_pct: float = 0.08         # 8% edge between NOAA and market price
+    max_days_to_resolution: int = 7    # Only trade markets expiring within 7 days
+    min_days_to_resolution: int = 1    # Avoid markets expiring today
+    max_size_usd: float = 100.0        # Max position per market
+    max_total_exposure_usd: float = 500.0
+    min_volume_usd: float = 1000.0     # Minimum market volume ($1K liquidity)
+    cities: list[str] = field(default_factory=lambda: [
+        "new york", "los angeles", "chicago", "houston", "phoenix",
+        "seattle", "miami", "boston", "dallas", "denver",
+        "san francisco", "atlanta", "washington dc",
+    ])
 
 
 @dataclass
@@ -306,6 +326,7 @@ class Config:
     drawdown_accumulation: DrawdownAccumulationConfig = field(default_factory=DrawdownAccumulationConfig)
     position_guard: PositionGuardConfig = field(default_factory=PositionGuardConfig)
     cross_platform_arb: CrossPlatformArbConfig = field(default_factory=CrossPlatformArbConfig)
+    weather_arb: WeatherArbConfig = field(default_factory=WeatherArbConfig)
     telegram: TelegramConfig = field(default_factory=TelegramConfig)
     auth: AuthConfig = field(default_factory=AuthConfig)
     server: ServerConfig = field(default_factory=ServerConfig)
@@ -459,6 +480,11 @@ def _apply_yaml(cfg: Config, raw: dict) -> None:
         for k, v in raw["cross_platform_arb"].items():
             if hasattr(cfg.cross_platform_arb, k):
                 setattr(cfg.cross_platform_arb, k, v)
+
+    if "weather_arb" in raw:
+        for k, v in raw["weather_arb"].items():
+            if hasattr(cfg.weather_arb, k):
+                setattr(cfg.weather_arb, k, v)
 
     if "telegram" in raw:
         for k, v in raw["telegram"].items():
