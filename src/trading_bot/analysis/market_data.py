@@ -158,10 +158,12 @@ async def web_search(query: str, max_results: int = 8) -> str:
 
 async def get_polymarket_data(condition_id: str) -> PolymarketData:
     """Fetch market data from Polymarket's public API."""
+    if not condition_id:
+        raise ValueError("condition_id must not be empty")
     url = f"https://clob.polymarket.com/markets/{condition_id}"
 
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
             resp = await client.get(url)
             resp.raise_for_status()
             data = resp.json()

@@ -174,8 +174,19 @@ class PolymarketBroker(BaseBroker):
             )
 
             order_id = signed_order.get("orderID", str(uuid4()))
-            success = signed_order.get("success", False)
-            status = OrderStatus.PENDING if success else OrderStatus.REJECTED
+            # CLOB API returns orderID on success; no "success" field exists
+            success = bool(signed_order.get("orderID"))
+            status_str = signed_order.get("status", "").upper()
+            if status_str in ("MATCHED", "FILLED"):
+                status = OrderStatus.FILLED
+            elif status_str in ("CANCELLED", "CANCELED"):
+                status = OrderStatus.CANCELLED
+            elif success:
+                status = OrderStatus.PENDING
+            else:
+                status = OrderStatus.REJECTED
+
+            log.info(f"Polymarket order {order_id}: status={status.value} raw={signed_order}")
 
             return OrderResult(
                 order_id=order_id,
@@ -183,8 +194,8 @@ class PolymarketBroker(BaseBroker):
                 side=order.side,
                 quantity=order.quantity,
                 status=status,
-                filled_price=price if success else None,
-                filled_at=datetime.now() if success else None,
+                filled_price=price if status in (OrderStatus.FILLED, OrderStatus.PENDING) else None,
+                filled_at=datetime.now() if status == OrderStatus.FILLED else None,
                 platform=Platform.POLYMARKET,
             )
         except Exception as e:

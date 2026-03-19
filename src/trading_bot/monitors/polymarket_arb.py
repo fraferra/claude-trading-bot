@@ -162,7 +162,13 @@ class PolymarketArbMonitor(BaseMonitor):
             return
 
         # Re-verify with fresh quotes
-        token_ids = [o.get("token_id", o.get("condition_id", "")) for o in outcomes]
+        # Prefer token_id (for CLOB midpoint API), fall back to condition_id; skip blanks
+        token_ids = [o.get("token_id") or o.get("condition_id", "") for o in outcomes]
+        outcomes = [o for o, t in zip(outcomes, token_ids) if t]
+        token_ids = [t for t in token_ids if t]
+        if len(token_ids) < 2:
+            log.info(f"PolymarketArb: not enough outcomes with valid IDs for {event_title}, skipping")
+            return
         try:
             fresh_prices = await asyncio.gather(
                 *[self._get_price(broker, t) for t in token_ids],

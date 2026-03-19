@@ -5,8 +5,31 @@ from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
+import httpx
+
 from trading_bot.brokers.base import BaseBroker
 from trading_bot.analysis.market_data import get_polymarket_data
+
+POLYMARKET_HOST = "https://clob.polymarket.com"
+
+
+async def _get_token_price(token_id: str) -> float | None:
+    """Fetch midpoint price for a token_id from CLOB API."""
+    if not token_id:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
+            resp = await client.get(
+                f"{POLYMARKET_HOST}/midpoint",
+                params={"token_id": token_id},
+            )
+            if resp.status_code == 200:
+                mid = resp.json().get("mid")
+                if mid is not None:
+                    return float(mid)
+    except Exception:
+        pass
+    return None
 from trading_bot.models import (
     OrderRequest,
     OrderResult,
@@ -92,12 +115,10 @@ class PaperPolymarketBroker(BaseBroker):
         cid = order.symbol
         side_str = order.side.value
 
-        # Get current market price
-        try:
-            market = await get_polymarket_data(cid)
-            fill_price = market.yes_price if order.side == Side.BUY else market.no_price
-        except Exception as e:
-            log.error(f"Cannot get market price for {cid}: {e}")
+        # Get current market price via CLOB midpoint (token_id-based)
+        fill_price = await _get_token_price(cid)
+        if fill_price is None:
+            log.error(f"Cannot get market price for token {cid}: midpoint returned None")
             return OrderResult(
                 order_id=str(uuid4()),
                 symbol=cid,
@@ -199,8 +220,15 @@ class PaperPolymarketBroker(BaseBroker):
         return OrderStatus.REJECTED
 
     async def get_quote(self, symbol: str) -> float:
-        market = await get_polymarket_data(symbol)
-        return market.yes_price
+        price = await _get_token_price(symbol)
+        if price is not None:
+            return price
+        # Fallback: treat symbol as condition_id for Gamma API
+        try:
+            market = await get_polymarket_data(symbol)
+            return market.yes_price
+        except Exception:
+            return 0.5
 
     def reset(self) -> None:
         """Reset paper trading state."""
