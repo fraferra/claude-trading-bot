@@ -15,6 +15,7 @@ import Shorts from './pages/Shorts';
 import Analytics from './pages/Analytics';
 import RiskDashboard from './pages/RiskDashboard';
 import Backtest from './pages/Backtest';
+import Polymarket from './pages/Polymarket';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -38,6 +39,7 @@ export default function App() {
             <Route path="/trade" element={<Trade />} />
             <Route path="/markets" element={<Markets />} />
             <Route path="/kalshi" element={<Kalshi />} />
+            <Route path="/polymarket" element={<Polymarket />} />
             <Route path="/crypto" element={<Crypto />} />
             <Route path="/shorts" element={<Shorts />} />
             <Route path="/analytics" element={<Analytics />} />

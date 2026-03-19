@@ -82,6 +82,21 @@ kalshi:
     - finance
   max_days_until_close: 90    # Only trade markets closing within 90 days
 
+# Cross-platform arbitrage: Polymarket ↔ Kalshi spread detection
+cross_platform_arb:
+  enabled: true
+  scan_interval_minutes: 2          # Scan every 2 minutes
+  min_net_edge_pct: 0.02            # 2% net after fees
+  min_volume_usd: 10000.0           # Only trade markets with $10K+ volume
+  max_size_per_leg_usd: 200.0       # $200 per leg (Poly + Kalshi)
+  max_total_exposure_usd: 2000.0    # Max $2K cross-platform exposure
+  fuzzy_match_threshold: 0.75       # Market name similarity score
+  market_cache_ttl_seconds: 3600    # Re-match markets hourly
+  min_days_to_resolution: 1
+  max_days_to_resolution: 60        # Avoid far-future markets (capital lockup)
+  fee_estimate_poly_pct: 0.0        # Polymarket maker fee (0%)
+  fee_estimate_kalshi_pct: 0.02     # Kalshi fee estimate (~2% at 50%)
+
 # Kalshi MECE arbitrage (pure math, no LLM)
 # Targets range/bucket events (Fed rate, CPI, etc.) where sum of YES prices != $1.00
 kalshi_arb:

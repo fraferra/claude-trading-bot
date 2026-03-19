@@ -246,6 +246,42 @@ CREATE TABLE IF NOT EXISTS position_high_watermarks (
     entry_price REAL NOT NULL,
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- Polymarket settlement tracking for concluded markets
+CREATE TABLE IF NOT EXISTS polymarket_settlements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    trade_id INTEGER UNIQUE NOT NULL,
+    condition_id TEXT NOT NULL,
+    token_id TEXT NOT NULL,
+    side TEXT NOT NULL,
+    quantity REAL NOT NULL,
+    entry_price REAL NOT NULL,
+    result TEXT NOT NULL,
+    payout_per_contract REAL NOT NULL,
+    total_pnl REAL NOT NULL,
+    settled_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (trade_id) REFERENCES trades(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_polymarket_settlements_condition ON polymarket_settlements(condition_id);
+CREATE INDEX IF NOT EXISTS idx_polymarket_settlements_settled ON polymarket_settlements(settled_at);
+
+-- Cross-platform arb pair tracking (Polymarket ↔ Kalshi)
+CREATE TABLE IF NOT EXISTS arb_pairs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    polymarket_trade_id INTEGER,
+    kalshi_trade_id INTEGER,
+    strategy TEXT NOT NULL DEFAULT 'cross_platform_arb',
+    gross_edge REAL,
+    net_edge REAL,
+    status TEXT NOT NULL DEFAULT 'open',
+    realized_pnl REAL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    closed_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_arb_pairs_status ON arb_pairs(status);
+CREATE INDEX IF NOT EXISTS idx_arb_pairs_created ON arb_pairs(created_at);
 """
 
 

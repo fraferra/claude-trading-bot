@@ -5,6 +5,7 @@ from datetime import datetime
 from functools import partial
 from uuid import uuid4
 
+import httpx
 from py_clob_client.client import ClobClient
 from py_clob_client.clob_types import OrderArgs, OrderType as ClobOrderType
 
@@ -51,33 +52,56 @@ class PolymarketBroker(BaseBroker):
     async def get_account(self) -> PortfolioSummary:
         """Get account balance and positions from Polymarket."""
         positions = await self.get_positions()
-        # Polymarket doesn't have a single "account" endpoint — derive from positions
         total_value = sum(p.market_value for p in positions)
+        cash = await self._get_usdc_balance()
 
         return PortfolioSummary(
-            cash=0.0,  # Would need to check on-chain USDC balance
-            equity=total_value,
+            cash=cash,
+            equity=total_value + cash,
             positions=positions,
             daily_pnl=0.0,
             platform=Platform.POLYMARKET,
         )
 
+    async def _get_usdc_balance(self) -> float:
+        """Fetch USDC.e balance from CLOB API."""
+        try:
+            loop = asyncio.get_event_loop()
+            balance_data = await loop.run_in_executor(None, self.client.get_balance_allowance)
+            if isinstance(balance_data, dict):
+                # Returns asset balances; USDC/collateral is the cash balance
+                raw = balance_data.get("balance", balance_data.get("collateral_balance", 0))
+                return float(raw)
+        except Exception as e:
+            log.debug(f"Polymarket balance fetch failed: {e}")
+        return 0.0
+
     async def get_positions(self) -> list[Position]:
-        """Fetch open positions from Polymarket."""
+        """Fetch open positions from Polymarket using the positions endpoint."""
         loop = asyncio.get_event_loop()
 
+        try:
+            # Try the dedicated positions endpoint first
+            positions_data = await loop.run_in_executor(None, self.client.get_positions)
+            if positions_data:
+                return self._parse_positions(positions_data)
+        except Exception:
+            pass
+
+        # Fallback: infer from filled orders
         try:
             orders = await loop.run_in_executor(None, self.client.get_orders)
         except Exception as e:
             log.error(f"Failed to fetch Polymarket positions: {e}")
             return []
 
-        # Aggregate filled orders into positions
         positions_map: dict[str, dict] = {}
         for order in orders:
             if order.get("status") != "MATCHED":
                 continue
             asset_id = order.get("asset_id", "")
+            if not asset_id:
+                continue
             if asset_id not in positions_map:
                 positions_map[asset_id] = {"quantity": 0.0, "total_cost": 0.0}
 
@@ -97,26 +121,46 @@ class PolymarketBroker(BaseBroker):
                 symbol=asset_id,
                 quantity=data["quantity"],
                 avg_entry_price=data["total_cost"] / data["quantity"] if data["quantity"] > 0 else 0,
-                current_price=0.0,  # Would need a separate price lookup
-                market_value=data["quantity"] * (data["total_cost"] / data["quantity"]) if data["quantity"] > 0 else 0,
+                current_price=0.0,
+                market_value=data["total_cost"] if data["quantity"] > 0 else 0,
                 unrealized_pnl=0.0,
                 platform=Platform.POLYMARKET,
             )
             for asset_id, data in positions_map.items()
-            if data["quantity"] > 0
+            if data["quantity"] > 0.001
         ]
+
+    def _parse_positions(self, positions_data: list[dict]) -> list[Position]:
+        """Parse positions from the /positions endpoint response."""
+        result = []
+        for p in positions_data:
+            size = float(p.get("size", p.get("quantity", 0)))
+            if size <= 0:
+                continue
+            avg_price = float(p.get("average_price", p.get("avgPrice", 0)))
+            token_id = p.get("asset", p.get("token_id", p.get("asset_id", "")))
+            current = float(p.get("cur_price", p.get("price", avg_price)))
+
+            result.append(Position(
+                symbol=token_id,
+                quantity=size,
+                avg_entry_price=avg_price,
+                current_price=current,
+                market_value=size * current,
+                unrealized_pnl=(current - avg_price) * size,
+                platform=Platform.POLYMARKET,
+            ))
+        return result
 
     async def submit_order(self, order: OrderRequest) -> OrderResult:
         """Submit a limit order on Polymarket."""
         loop = asyncio.get_event_loop()
 
-        # Polymarket uses token IDs, not condition IDs for orders
-        # The caller needs to provide the correct token_id as the symbol
         token_id = order.symbol
         side_str = "BUY" if order.side == Side.BUY else "SELL"
-        price = order.limit_price or 0.5  # Default to 0.5 if no price set
+        price = order.limit_price or 0.5
 
-        log.info(f"Submitting Polymarket order: {side_str} {order.quantity} @ ${price}")
+        log.info(f"Submitting Polymarket order: {side_str} {order.quantity:.4f} @ ${price:.4f}")
 
         try:
             order_args = OrderArgs(
@@ -130,7 +174,8 @@ class PolymarketBroker(BaseBroker):
             )
 
             order_id = signed_order.get("orderID", str(uuid4()))
-            status = OrderStatus.PENDING if signed_order.get("success") else OrderStatus.REJECTED
+            success = signed_order.get("success", False)
+            status = OrderStatus.PENDING if success else OrderStatus.REJECTED
 
             return OrderResult(
                 order_id=order_id,
@@ -138,8 +183,8 @@ class PolymarketBroker(BaseBroker):
                 side=order.side,
                 quantity=order.quantity,
                 status=status,
-                filled_price=price if status == OrderStatus.FILLED else None,
-                filled_at=datetime.now() if status == OrderStatus.FILLED else None,
+                filled_price=price if success else None,
+                filled_at=datetime.now() if success else None,
                 platform=Platform.POLYMARKET,
             )
         except Exception as e:
@@ -181,7 +226,60 @@ class PolymarketBroker(BaseBroker):
             return OrderStatus.REJECTED
 
     async def get_quote(self, symbol: str) -> float:
-        from trading_bot.analysis.market_data import get_polymarket_data
+        """Get the midpoint price for a token using CLOB midpoint endpoint."""
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(
+                    f"{POLYMARKET_HOST}/midpoint",
+                    params={"token_id": symbol},
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    mid = data.get("mid")
+                    if mid is not None:
+                        return float(mid)
+        except Exception:
+            pass
 
-        market = await get_polymarket_data(symbol)
-        return market.yes_price
+        # Fallback to market data
+        try:
+            from trading_bot.analysis.market_data import get_polymarket_data
+            market = await get_polymarket_data(symbol)
+            return market.yes_price
+        except Exception as e:
+            log.debug(f"Polymarket quote fallback failed for {symbol}: {e}")
+            return 0.0
+
+    async def check_market_settled(self, token_id: str) -> tuple[bool, str | None]:
+        """Check if a Polymarket market has resolved. Returns (is_settled, result)."""
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(
+                    f"{POLYMARKET_HOST}/markets",
+                    params={"clob_token_ids": token_id},
+                )
+                if resp.status_code != 200:
+                    return False, None
+
+                markets = resp.json()
+                if not markets:
+                    return False, None
+
+                market = markets[0] if isinstance(markets, list) else markets
+                is_resolved = market.get("closed", False) or market.get("resolved", False)
+                if not is_resolved:
+                    return False, None
+
+                for token in market.get("tokens", []):
+                    if token.get("token_id") == token_id and token.get("winner", False):
+                        return True, token.get("outcome", "").lower()
+
+                # If resolved but no winner token found, check all tokens
+                for token in market.get("tokens", []):
+                    if token.get("winner", False):
+                        return True, token.get("outcome", "").lower()
+
+        except Exception as e:
+            log.debug(f"Polymarket settlement check failed for {token_id}: {e}")
+
+        return False, None

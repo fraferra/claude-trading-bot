@@ -8,6 +8,7 @@ from trading_bot.config import Config
 from trading_bot.db.repository import Repository
 from trading_bot.monitors.base import BaseMonitor, EventBus
 from trading_bot.monitors.cross_market import CrossMarketMonitor
+from trading_bot.monitors.cross_platform_arb import CrossPlatformArbMonitor
 from trading_bot.monitors.crypto_momentum import CryptoMomentumMonitor
 from trading_bot.monitors.drawdown_accumulation import DrawdownAccumulationMonitor
 from trading_bot.monitors.kalshi_arb import KalshiArbMonitor
@@ -36,6 +37,7 @@ MONITOR_TYPES: dict[str, type[BaseMonitor]] = {
     "drawdown_accumulation": DrawdownAccumulationMonitor,
     "position_guard": PositionGuardMonitor,
     "regime_classifier": RegimeClassifierMonitor,
+    "cross_platform_arb": CrossPlatformArbMonitor,
 }
 
 

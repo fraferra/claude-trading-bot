@@ -108,6 +108,21 @@ export const api = {
   getKalshiSettlements: (limit = 50) => request<any[]>(`/kalshi/settlements?limit=${limit}`),
   scanKalshi: () => request<any>('/kalshi/scan', { method: 'POST' }),
 
+  // Polymarket
+  getPolymarketPortfolio: () => request<any>('/polymarket/portfolio'),
+  getPolymarketPositions: () => request<any>('/polymarket/positions'),
+  getPolymarketTrades: (limit = 50) => request<any[]>(`/polymarket/trades?limit=${limit}`),
+  getPolymarketSettlements: (limit = 50) => request<any[]>(`/polymarket/settlements?limit=${limit}`),
+  getPolymarketArbOpportunities: (limit = 20) => request<any>(`/polymarket/arb-opportunities?limit=${limit}`),
+  getPolymarketCrossPlatformPairs: (status?: string) =>
+    request<any>(`/polymarket/cross-platform-pairs${status ? `?status=${status}` : ''}`),
+  getPolymarketPnlHistory: () => request<any>('/polymarket/pnl-history'),
+  getPolymarketMonitorStats: () => request<any>('/polymarket/monitor-stats'),
+  getPolymarketDecisions: (limit = 50, agentType?: string) =>
+    request<any>(`/polymarket/decisions?limit=${limit}${agentType ? `&agent_type=${agentType}` : ''}`),
+  scanPolymarketArb: () => request<any>('/polymarket/arb-scan', { method: 'POST' }),
+  scanPolymarketCrossPlatform: () => request<any>('/polymarket/cross-platform-scan', { method: 'POST' }),
+
   // Crypto
   getCryptoSignals: (symbol?: string) =>
     request<any[]>(`/crypto/signals${symbol ? `/${symbol}` : ''}`),

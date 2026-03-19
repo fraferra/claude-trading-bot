@@ -705,12 +705,14 @@ class Repository:
         """Compute daily cumulative realized P&L for a platform.
 
         For stocks/crypto: FIFO cost-basis matching of buy/sell trades.
-        For Kalshi: uses pre-calculated settlement P&L.
+        For Kalshi/Polymarket: uses pre-calculated settlement P&L.
 
         Returns list of {"date": "YYYY-MM-DD", "daily_pnl": float, "cumulative_pnl": float}.
         """
         if platform == "kalshi":
             return await self._get_kalshi_cumulative_pnl()
+        if platform == "polymarket":
+            return await self.get_polymarket_cumulative_pnl()
         return await self._get_trade_cumulative_pnl(platform)
 
     async def _get_kalshi_cumulative_pnl(self) -> list[dict]:
@@ -847,6 +849,131 @@ class Repository:
         cursor = await self._db.db.execute(query, params)
         rows = await cursor.fetchall()
         return [dict(r) for r in rows]
+
+    # --- Polymarket Settlements ---
+
+    async def insert_polymarket_settlement(
+        self,
+        trade_id: int,
+        condition_id: str,
+        token_id: str,
+        side: str,
+        quantity: float,
+        entry_price: float,
+        result: str,
+        payout_per_contract: float,
+        total_pnl: float,
+    ) -> int:
+        cursor = await self._db.db.execute(
+            """INSERT OR IGNORE INTO polymarket_settlements
+               (trade_id, condition_id, token_id, side, quantity, entry_price, result,
+                payout_per_contract, total_pnl)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (trade_id, condition_id, token_id, side, quantity, entry_price,
+             result, payout_per_contract, total_pnl),
+        )
+        await self._db.db.commit()
+        return cursor.lastrowid  # type: ignore[return-value]
+
+    async def get_polymarket_settlements(self, limit: int = 50) -> list[dict]:
+        cursor = await self._db.db.execute(
+            """SELECT ps.*, t.reasoning, t.source, t.strategy_name
+               FROM polymarket_settlements ps
+               JOIN trades t ON ps.trade_id = t.id
+               ORDER BY ps.settled_at DESC LIMIT ?""",
+            (limit,),
+        )
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+
+    async def get_unsettled_polymarket_trades(self) -> list[dict]:
+        """Get all Polymarket trades that haven't been settled yet."""
+        cursor = await self._db.db.execute(
+            """SELECT t.* FROM trades t
+               WHERE t.platform = 'polymarket'
+               AND t.status = 'filled'
+               AND t.id NOT IN (SELECT trade_id FROM polymarket_settlements)
+               ORDER BY t.created_at ASC"""
+        )
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+
+    async def get_polymarket_settled_trade_ids(self) -> set[int]:
+        cursor = await self._db.db.execute(
+            "SELECT trade_id FROM polymarket_settlements"
+        )
+        rows = await cursor.fetchall()
+        return {row["trade_id"] for row in rows}
+
+    # --- Arb Pairs (Cross-Platform) ---
+
+    async def insert_arb_pair(
+        self,
+        polymarket_trade_id: int | None,
+        kalshi_trade_id: int | None,
+        gross_edge: float,
+        net_edge: float,
+        strategy: str = "cross_platform_arb",
+    ) -> int:
+        cursor = await self._db.db.execute(
+            """INSERT INTO arb_pairs
+               (polymarket_trade_id, kalshi_trade_id, strategy, gross_edge, net_edge)
+               VALUES (?, ?, ?, ?, ?)""",
+            (polymarket_trade_id, kalshi_trade_id, strategy, gross_edge, net_edge),
+        )
+        await self._db.db.commit()
+        return cursor.lastrowid  # type: ignore[return-value]
+
+    async def close_arb_pair(self, arb_pair_id: int, realized_pnl: float) -> None:
+        await self._db.db.execute(
+            """UPDATE arb_pairs
+               SET status = 'closed', realized_pnl = ?, closed_at = datetime('now')
+               WHERE id = ?""",
+            (realized_pnl, arb_pair_id),
+        )
+        await self._db.db.commit()
+
+    async def get_arb_pairs(self, status: str | None = None, limit: int = 50) -> list[dict]:
+        query = "SELECT * FROM arb_pairs WHERE 1=1"
+        params: list = []
+        if status:
+            query += " AND status = ?"
+            params.append(status)
+        query += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+        cursor = await self._db.db.execute(query, params)
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+
+    async def get_polymarket_cumulative_pnl(self) -> list[dict]:
+        """Cumulative P&L for Polymarket — combines trading P&L and settlement P&L."""
+        daily_pnl: dict[str, float] = defaultdict(float)
+
+        trade_series = await self._get_trade_cumulative_pnl("polymarket")
+        for point in trade_series:
+            daily_pnl[point["date"]] += point["daily_pnl"]
+
+        cursor = await self._db.db.execute(
+            """SELECT date(settled_at) as settle_date, SUM(total_pnl) as day_pnl
+               FROM polymarket_settlements
+               GROUP BY date(settled_at)
+               ORDER BY settle_date ASC"""
+        )
+        rows = await cursor.fetchall()
+        for row in rows:
+            r = dict(row)
+            daily_pnl[r["settle_date"]] += r["day_pnl"]
+
+        result = []
+        cumulative = 0.0
+        for d in sorted(daily_pnl.keys()):
+            cumulative += daily_pnl[d]
+            result.append({
+                "date": d,
+                "daily_pnl": round(daily_pnl[d], 2),
+                "cumulative_pnl": round(cumulative, 2),
+            })
+        return result
 
     async def get_trades_csv(self) -> list[dict]:
         """Get all trades formatted for CSV export."""

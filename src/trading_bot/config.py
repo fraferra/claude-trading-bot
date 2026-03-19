@@ -40,6 +40,9 @@ class PolymarketConfig:
     api_passphrase: str = ""
     paper: bool = True
     paper_balance: float = 10_000.0
+    ws_enabled: bool = False      # Enable real-time WebSocket price feed
+    ws_top_markets: int = 200     # Subscribe to top N markets by volume
+    ws_price_ttl_seconds: int = 5  # Cache expiry for WS prices
 
 
 @dataclass
@@ -259,6 +262,23 @@ class ServerConfig:
 
 
 @dataclass
+class CrossPlatformArbConfig:
+    """Cross-platform arbitrage: Polymarket ↔ Kalshi price spread detection."""
+    enabled: bool = True
+    scan_interval_minutes: int = 2        # Scan every 2 minutes
+    min_net_edge_pct: float = 0.02        # 2% net after fees
+    min_volume_usd: float = 10_000.0      # Only trade high-volume markets
+    max_size_per_leg_usd: float = 200.0
+    max_total_exposure_usd: float = 2_000.0
+    fuzzy_match_threshold: float = 0.75   # Market name similarity score
+    market_cache_ttl_seconds: int = 3600  # Re-match markets hourly
+    min_days_to_resolution: int = 1       # Avoid immediately expiring markets
+    max_days_to_resolution: int = 60      # Avoid far-future markets (capital lockup)
+    fee_estimate_poly_pct: float = 0.0    # Polymarket maker fee (0% by default)
+    fee_estimate_kalshi_pct: float = 0.02 # Kalshi fee estimate (~2% at 50% probability)
+
+
+@dataclass
 class StrategiesConfig:
     arbitrage: ArbitrageConfig = field(default_factory=ArbitrageConfig)
     cross_market: CrossMarketConfig = field(default_factory=CrossMarketConfig)
@@ -285,6 +305,7 @@ class Config:
     shorts: ShortConfig = field(default_factory=ShortConfig)
     drawdown_accumulation: DrawdownAccumulationConfig = field(default_factory=DrawdownAccumulationConfig)
     position_guard: PositionGuardConfig = field(default_factory=PositionGuardConfig)
+    cross_platform_arb: CrossPlatformArbConfig = field(default_factory=CrossPlatformArbConfig)
     telegram: TelegramConfig = field(default_factory=TelegramConfig)
     auth: AuthConfig = field(default_factory=AuthConfig)
     server: ServerConfig = field(default_factory=ServerConfig)
@@ -433,6 +454,11 @@ def _apply_yaml(cfg: Config, raw: dict) -> None:
         for k, v in raw["position_guard"].items():
             if hasattr(cfg.position_guard, k):
                 setattr(cfg.position_guard, k, v)
+
+    if "cross_platform_arb" in raw:
+        for k, v in raw["cross_platform_arb"].items():
+            if hasattr(cfg.cross_platform_arb, k):
+                setattr(cfg.cross_platform_arb, k, v)
 
     if "telegram" in raw:
         for k, v in raw["telegram"].items():
