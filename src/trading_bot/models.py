@@ -150,8 +150,8 @@ class PolymarketData(BaseModel):
     no_price: float
     volume: float = 0.0
     liquidity: float = 0.0
-    end_date: str = ""
-    description: str = ""
+    end_date: str | None = ""
+    description: str | None = ""
     tokens: list[dict] = Field(default_factory=list)
 
 

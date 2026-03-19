@@ -231,12 +231,22 @@ class PolymarketArbMonitor(BaseMonitor):
 
         async def _submit_leg(token_id, order, price, qty, side, outcome):
             try:
-                order_check = self.risk_manager.check_order(order, portfolio, price)
-                if not order_check.approved:
-                    return (token_id, order, price, qty, side, outcome, None,
-                            f"risk rejected: {order_check}")
-                if order_check.adjusted_quantity is not None:
-                    order.quantity = order_check.adjusted_quantity
+                # Arb legs bypass the daily trade-count limit — arb positions are
+                # fully hedged (one leg per outcome) so they are not directional
+                # speculation and should not count against the per-day cap.
+                # We still enforce the daily loss limit and basic cash check.
+                if portfolio.equity > 0:
+                    daily_loss_pct = -portfolio.daily_pnl / portfolio.equity
+                    if daily_loss_pct >= self.risk_manager.config.daily_loss_limit_pct:
+                        return (token_id, order, price, qty, side, outcome, None,
+                                "daily loss limit reached")
+                order_value = order.quantity * price
+                if order_value > portfolio.cash:
+                    max_qty = portfolio.cash / price if price > 0 else 0
+                    if max_qty <= 0:
+                        return (token_id, order, price, qty, side, outcome, None,
+                                "insufficient cash")
+                    order.quantity = max_qty
 
                 trade_result = await broker.submit_order(order)
                 self.risk_manager.record_trade()

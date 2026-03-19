@@ -38,11 +38,16 @@ class ArbitrageScanner(BaseStrategy):
         raw_events = await get_all_events(limit=self.arb_config.max_events_to_scan)
         events = [parse_event_to_model(e) for e in raw_events]
 
+        seen_event_ids: set[str] = set()
         opportunities: list[ArbitrageOpportunity] = []
         for event in events:
+            if event.event_id and event.event_id in seen_event_ids:
+                continue
             opp = self._check_event(event)
             if opp is not None:
                 opportunities.append(opp)
+            if event.event_id:
+                seen_event_ids.add(event.event_id)
 
         opportunities.sort(key=lambda o: o.edge_pct, reverse=True)
 
