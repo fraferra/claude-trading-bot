@@ -180,9 +180,9 @@ export default function Polymarket() {
   const losses = settledList.filter((s: any) => s.total_pnl <= 0).length;
   const hasPortfolio = portfolio && !portfolio.error;
 
-  const latestCumPnl = pnlHistory.length > 0
-    ? pnlHistory[pnlHistory.length - 1].cumulative_pnl
-    : 0;
+  // Unrealized P&L = sum of position-level unrealized P&L from live market prices
+  const unrealizedPnl = positions.reduce((s: number, p: any) => s + (p.unrealized_pnl || 0), 0);
+  const totalPnl = unrealizedPnl + settledPnl;
 
   return (
     <div className="space-y-6">
@@ -210,7 +210,7 @@ export default function Polymarket() {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
         <Card title="USDC Balance">
           <p className="text-2xl font-bold text-white">
             ${hasPortfolio ? (portfolio.cash || 0).toFixed(2) : '—'}
@@ -218,6 +218,17 @@ export default function Polymarket() {
         </Card>
         <Card title="Open Positions">
           <p className="text-2xl font-bold text-white">{positions.length}</p>
+          {positions.length > 0 && (
+            <p className="text-xs text-slate-500 mt-1">
+              ${positions.reduce((s: number, p: any) => s + (p.market_value || 0), 0).toFixed(2)} exposure
+            </p>
+          )}
+        </Card>
+        <Card title="Unrealized P&L">
+          <p className={`text-2xl font-bold ${unrealizedPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+            {unrealizedPnl >= 0 ? '+' : ''}${unrealizedPnl.toFixed(2)}
+          </p>
+          <p className="text-xs text-slate-500 mt-1">open positions vs entry</p>
         </Card>
         <Card title="Settled P&L">
           <p className={`text-2xl font-bold ${settledPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
@@ -229,10 +240,11 @@ export default function Polymarket() {
             </p>
           )}
         </Card>
-        <Card title="Cumulative P&L">
-          <p className={`text-2xl font-bold ${latestCumPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-            {latestCumPnl >= 0 ? '+' : ''}${latestCumPnl.toFixed(2)}
+        <Card title="Total P&L">
+          <p className={`text-2xl font-bold ${totalPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+            {totalPnl >= 0 ? '+' : ''}${totalPnl.toFixed(2)}
           </p>
+          <p className="text-xs text-slate-500 mt-1">unrealized + settled</p>
         </Card>
       </div>
 

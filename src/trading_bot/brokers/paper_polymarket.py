@@ -89,10 +89,21 @@ class PaperPolymarketBroker(BaseBroker):
             if pos_data["quantity"] <= 0:
                 continue
 
-            try:
-                market = await get_polymarket_data(cid)
-                current_price = market.yes_price if pos_data["side"] == "buy" else market.no_price
-            except Exception:
+            current_price: float | None = None
+
+            # Try CLOB midpoint first — works for both token_ids and condition_ids
+            current_price = await _get_token_price(cid)
+
+            # Fallback to Gamma API (condition_id-based markets)
+            if current_price is None:
+                try:
+                    market = await get_polymarket_data(cid)
+                    current_price = market.yes_price if pos_data["side"] == "buy" else market.no_price
+                except Exception:
+                    pass
+
+            # Last resort: keep entry price (unrealized P&L = 0)
+            if current_price is None:
                 current_price = pos_data["avg_entry_price"]
 
             qty = pos_data["quantity"]
