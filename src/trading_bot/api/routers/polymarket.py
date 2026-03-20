@@ -96,7 +96,9 @@ async def get_monitor_stats(
     states = await repo.get_all_monitor_states()
     poly_monitors = [
         s for s in states
-        if s.get("monitor_type") in ("polymarket_arb", "cross_platform_arb", "cross_market")
+        if s.get("monitor_type") in (
+            "polymarket_arb", "cross_platform_arb", "cross_market", "temporal_momentum"
+        )
     ]
     return {"monitors": poly_monitors}
 
@@ -130,6 +132,78 @@ async def trigger_arb_scan(request: Request, repo: Repository = Depends(get_repo
         "events_scanned": result.metadata.get("events_scanned", 0),
         "opportunities_found": result.metadata.get("opportunities_found", 0),
         "opportunities": result.metadata.get("opportunities", [])[:10],
+    }
+
+
+@router.get("/polymarket/temporal-momentum/signals")
+async def get_temporal_momentum_signals(request: Request):
+    """Get current BTC/ETH/SOL momentum signals from the running monitor."""
+    manager = getattr(request.app.state, "monitor_manager", None)
+    if not manager:
+        return {"signals": {}, "active_markets": 0, "opportunities": []}
+
+    for monitor in manager._monitors.values():
+        if monitor.monitor_type == "temporal_momentum":
+            return {
+                "signals": getattr(monitor, "_latest_signals", {}),
+                "active_markets": len(getattr(monitor, "_active_markets", [])),
+                "opportunities": getattr(monitor, "_latest_opportunities", []),
+                "total_exposure_usd": getattr(monitor, "_total_exposure_usd", 0.0),
+            }
+    return {"signals": {}, "active_markets": 0, "opportunities": []}
+
+
+@router.get("/polymarket/temporal-momentum/decisions")
+async def get_temporal_momentum_decisions(
+    limit: int = 50,
+    repo: Repository = Depends(get_repo),
+):
+    """Get recent temporal momentum arb decisions."""
+    decisions = await repo.get_agent_decisions(
+        agent_type="temporal_momentum",
+        limit=limit,
+    )
+    return {"decisions": decisions}
+
+
+@router.post("/polymarket/temporal-momentum/scan")
+async def trigger_temporal_momentum_scan(request: Request):
+    """Trigger an immediate temporal momentum scan on the running monitor."""
+    manager = getattr(request.app.state, "monitor_manager", None)
+    if not manager:
+        return {"error": "Monitor manager not available"}
+
+    for monitor in manager._monitors.values():
+        if monitor.monitor_type == "temporal_momentum":
+            try:
+                await monitor._refresh_markets()
+                await monitor.run_cycle()
+                return {
+                    "status": "scanned",
+                    "signals": getattr(monitor, "_latest_signals", {}),
+                    "opportunities": getattr(monitor, "_latest_opportunities", []),
+                }
+            except Exception as e:
+                return {"error": str(e)}
+
+    # No running monitor — do a one-shot strategy scan
+    config = request.app.state.config
+    from trading_bot.strategies.temporal_momentum_arb import TemporalMomentumArbStrategy
+    strategy = TemporalMomentumArbStrategy(config.temporal_momentum)
+    markets = await strategy.find_active_crypto_markets()
+    return {
+        "status": "static_scan",
+        "active_markets": len(markets),
+        "markets": [
+            {
+                "question": m["question"][:80],
+                "symbol": m["symbol"],
+                "minutes_remaining": round(m["minutes_remaining"], 1),
+                "yes_price": m["yes_price"],
+                "volume": m["volume"],
+            }
+            for m in markets[:20]
+        ],
     }
 
 

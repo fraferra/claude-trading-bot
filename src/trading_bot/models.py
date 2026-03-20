@@ -513,3 +513,49 @@ class StrategyMemo(BaseModel):
     parameter_changes: dict[str, Any] = Field(default_factory=dict)
     next_week_focus: list[str] = Field(default_factory=list)
     timestamp: datetime = Field(default_factory=datetime.now)
+
+
+# --- Temporal Momentum Arbitrage Models ---
+
+class MomentumSignal(BaseModel):
+    """Real-time spot price momentum signal from Binance."""
+    symbol: str                       # "BTC", "ETH", "SOL"
+    current_price: float
+    change_1m_pct: float              # (current - 1m_ago) / 1m_ago
+    change_3m_pct: float
+    change_5m_pct: float
+    velocity: float = 0.0             # second derivative of price (acceleration)
+    rsi_fast: float | None = None     # RSI(3) on 10-second bars
+    direction: str = "flat"           # "up", "down", "flat"
+    strength: float = 0.0             # 0.0–1.0 composite momentum score
+    timestamp: datetime = Field(default_factory=datetime.now)
+
+
+class TemporalArbOpportunity(BaseModel):
+    """A Polymarket binary crypto market that lags confirmed spot momentum."""
+    condition_id: str
+    token_id_yes: str
+    token_id_no: str
+    question: str
+    market_yes_price: float           # Current Polymarket YES price
+    market_no_price: float
+    momentum_signal: MomentumSignal
+    estimated_true_prob: float        # Our model's estimate of true YES probability
+    edge_pct: float                   # |estimated_true_prob - market_price| for chosen side
+    suggested_side: str               # "yes" or "no"
+    minutes_to_expiry: float
+    kelly_fraction: float
+    suggested_size_usd: float
+    timestamp: datetime = Field(default_factory=datetime.now)
+
+
+class OrderBookFrontRunSignal(BaseModel):
+    """Detected large incoming order in the CLOB order book."""
+    token_id: str
+    question: str
+    current_best_ask: float
+    large_order_size_usd: float       # Size of incoming order detected
+    estimated_price_impact: float     # How much the large order will move price
+    suggested_entry_price: float
+    suggested_size_usd: float
+    timestamp: datetime = Field(default_factory=datetime.now)

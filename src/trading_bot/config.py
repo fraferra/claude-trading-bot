@@ -282,6 +282,36 @@ class ServerConfig:
 
 
 @dataclass
+class TemporalMomentumConfig:
+    """Temporal momentum arbitrage: Binance spot price lag vs Polymarket binary crypto markets."""
+    enabled: bool = True
+    scan_interval_seconds: int = 2
+    binance_symbols: list[str] = field(default_factory=lambda: ["BTCUSDT", "ETHUSDT", "SOLUSDT"])
+    price_history_seconds: int = 360          # 6 minutes of rolling price history
+    # Momentum thresholds
+    min_price_change_1m_pct: float = 0.003    # 0.3% in 1 minute to trigger signal
+    momentum_strength_threshold: float = 0.65  # 0.0–1.0 composite score to enter
+    # Market matching
+    market_refresh_interval_seconds: int = 60  # How often to re-fetch active markets
+    min_volume_usd: float = 5_000.0
+    max_minutes_to_expiry: float = 20.0        # Only trade markets expiring within 20 min
+    min_minutes_to_expiry: float = 2.0         # Not too close to expiry
+    # Edge / execution
+    min_edge_pct: float = 0.15                 # e.g. market at 50%, we think 65%+ → trade
+    max_edge_pct: float = 0.48                 # Avoid near-certain markets (illiquid)
+    kelly_fraction_cap: float = 0.25
+    max_size_usd: float = 500.0
+    max_total_exposure_usd: float = 3_000.0
+    # Probability calibration
+    prob_full_strength: float = 0.85           # Estimated true prob at max momentum strength
+    # Order-book front-running
+    frontrun_enabled: bool = True
+    frontrun_min_order_size_usd: float = 10_000.0
+    frontrun_max_size_usd: float = 200.0
+    paper: bool = True
+
+
+@dataclass
 class CrossPlatformArbConfig:
     """Cross-platform arbitrage: Polymarket ↔ Kalshi price spread detection."""
     enabled: bool = True
@@ -327,6 +357,7 @@ class Config:
     position_guard: PositionGuardConfig = field(default_factory=PositionGuardConfig)
     cross_platform_arb: CrossPlatformArbConfig = field(default_factory=CrossPlatformArbConfig)
     weather_arb: WeatherArbConfig = field(default_factory=WeatherArbConfig)
+    temporal_momentum: TemporalMomentumConfig = field(default_factory=TemporalMomentumConfig)
     telegram: TelegramConfig = field(default_factory=TelegramConfig)
     auth: AuthConfig = field(default_factory=AuthConfig)
     server: ServerConfig = field(default_factory=ServerConfig)
@@ -485,6 +516,11 @@ def _apply_yaml(cfg: Config, raw: dict) -> None:
         for k, v in raw["weather_arb"].items():
             if hasattr(cfg.weather_arb, k):
                 setattr(cfg.weather_arb, k, v)
+
+    if "temporal_momentum" in raw:
+        for k, v in raw["temporal_momentum"].items():
+            if hasattr(cfg.temporal_momentum, k):
+                setattr(cfg.temporal_momentum, k, v)
 
     if "telegram" in raw:
         for k, v in raw["telegram"].items():

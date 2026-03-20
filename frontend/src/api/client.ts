@@ -122,6 +122,10 @@ export const api = {
     request<any>(`/polymarket/decisions?limit=${limit}${agentType ? `&agent_type=${agentType}` : ''}`),
   scanPolymarketArb: () => request<any>('/polymarket/arb-scan', { method: 'POST' }),
   scanPolymarketCrossPlatform: () => request<any>('/polymarket/cross-platform-scan', { method: 'POST' }),
+  getTemporalMomentumSignals: () => request<any>('/polymarket/temporal-momentum/signals'),
+  getTemporalMomentumDecisions: (limit = 50) =>
+    request<any>(`/polymarket/temporal-momentum/decisions?limit=${limit}`),
+  scanTemporalMomentum: () => request<any>('/polymarket/temporal-momentum/scan', { method: 'POST' }),
 
   // Crypto
   getCryptoSignals: (symbol?: string) =>

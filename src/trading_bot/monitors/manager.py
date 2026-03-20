@@ -21,6 +21,7 @@ from trading_bot.monitors.short_candidate import ShortCandidateMonitor
 from trading_bot.monitors.stock_watchlist import StockWatchlistMonitor
 from trading_bot.monitors.regime_classifier import RegimeClassifierMonitor
 from trading_bot.monitors.strategy_review import StrategyReviewMonitor
+from trading_bot.monitors.temporal_momentum_monitor import TemporalMomentumMonitor
 from trading_bot.monitors.weather_arb import WeatherArbMonitor
 from trading_bot.utils.logging import log
 
@@ -40,6 +41,7 @@ MONITOR_TYPES: dict[str, type[BaseMonitor]] = {
     "regime_classifier": RegimeClassifierMonitor,
     "cross_platform_arb": CrossPlatformArbMonitor,
     "weather_arb": WeatherArbMonitor,
+    "temporal_momentum": TemporalMomentumMonitor,
 }
 
 

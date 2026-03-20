@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   CheckCircle, XCircle,
-  ChevronDown, ChevronRight, Zap, Link,
+  ChevronDown, ChevronRight, Zap, Link, TrendingUp,
 } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 import { api } from '../api/client';
@@ -151,6 +151,17 @@ export default function Polymarket() {
     refetchInterval: 30_000,
   });
 
+  const { data: momentumData } = useQuery({
+    queryKey: ['temporal-momentum-signals'],
+    queryFn: api.getTemporalMomentumSignals,
+    refetchInterval: 3_000,
+  });
+  const { data: momentumDecisions } = useQuery({
+    queryKey: ['temporal-momentum-decisions'],
+    queryFn: () => api.getTemporalMomentumDecisions(30),
+    refetchInterval: 5_000,
+  });
+
   const arbScanMut = useMutation({
     mutationFn: api.scanPolymarketArb,
     onSuccess: () => {
@@ -164,6 +175,15 @@ export default function Polymarket() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['poly-pairs'] });
       queryClient.invalidateQueries({ queryKey: ['poly-decisions'] });
+    },
+  });
+
+  const momentumScanMut = useMutation({
+    mutationFn: api.scanTemporalMomentum,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['temporal-momentum-signals'] });
+      queryClient.invalidateQueries({ queryKey: ['temporal-momentum-decisions'] });
+      queryClient.invalidateQueries({ queryKey: ['poly-trades'] });
     },
   });
 
@@ -277,6 +297,156 @@ export default function Polymarket() {
                 </div>
               </div>
             ))}
+          </div>
+        </Card>
+      )}
+
+      {/* Temporal Momentum Arbitrage */}
+      <Card title="Temporal Momentum Arbitrage">
+        <div className="flex items-center justify-between mb-4">
+          <p className="text-xs text-slate-400">
+            Binance spot momentum vs Polymarket binary crypto markets (5/15-min)
+          </p>
+          <button
+            onClick={() => momentumScanMut.mutate()}
+            disabled={momentumScanMut.isPending}
+            className="flex items-center gap-2 px-3 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50 text-sm"
+          >
+            <TrendingUp size={14} className={momentumScanMut.isPending ? 'animate-pulse' : ''} />
+            {momentumScanMut.isPending ? 'Scanning…' : 'Momentum Scan'}
+          </button>
+        </div>
+
+        {/* Per-symbol momentum gauges */}
+        <div className="grid grid-cols-3 gap-3 mb-4">
+          {(['BTC', 'ETH', 'SOL'] as const).map(sym => {
+            const sig = momentumData?.signals?.[sym];
+            const dir: string = sig?.direction || 'flat';
+            const dirColors: Record<string, string> = {
+              up: 'bg-green-500/20 text-green-400',
+              down: 'bg-red-500/20 text-red-400',
+              flat: 'bg-slate-500/20 text-slate-400',
+            };
+            const strength = sig?.strength ?? 0;
+            const pct = Math.round(strength * 100);
+            const barColor = pct > 80 ? 'bg-orange-500' : pct > 65 ? 'bg-yellow-500' : 'bg-slate-600';
+            return (
+              <div key={sym} className="p-3 bg-slate-800/50 rounded">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="font-bold text-white text-sm">{sym}</span>
+                  <span className={`px-2 py-0.5 rounded text-xs font-bold ${dirColors[dir] || dirColors.flat}`}>
+                    {dir.toUpperCase()}
+                  </span>
+                </div>
+                {sig ? (
+                  <>
+                    <div className="w-full bg-slate-700 rounded-full h-1.5 mb-1">
+                      <div className={`h-1.5 rounded-full ${barColor} transition-all`} style={{ width: `${pct}%` }} />
+                    </div>
+                    <div className="text-xs text-slate-500 mt-1.5 space-y-0.5">
+                      <div className="flex justify-between">
+                        <span>Strength</span>
+                        <span className="text-slate-300">{pct}%</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>1m</span>
+                        <span className={sig.change_1m_pct >= 0 ? 'text-green-400' : 'text-red-400'}>
+                          {sig.change_1m_pct >= 0 ? '+' : ''}{(sig.change_1m_pct * 100).toFixed(3)}%
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>3m</span>
+                        <span className={sig.change_3m_pct >= 0 ? 'text-green-400' : 'text-red-400'}>
+                          {sig.change_3m_pct >= 0 ? '+' : ''}{(sig.change_3m_pct * 100).toFixed(3)}%
+                        </span>
+                      </div>
+                      {sig.current_price > 0 && (
+                        <div className="flex justify-between">
+                          <span>Price</span>
+                          <span className="text-slate-300">${sig.current_price.toLocaleString()}</span>
+                        </div>
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-xs text-slate-600 mt-2">Waiting for feed…</p>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Active opportunities */}
+        {(momentumData?.opportunities ?? []).length > 0 && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-slate-400 border-b border-slate-800">
+                  <th className="text-left py-1.5">Market</th>
+                  <th className="text-center py-1.5">Symbol</th>
+                  <th className="text-center py-1.5">Dir</th>
+                  <th className="text-right py-1.5">Mkt YES</th>
+                  <th className="text-right py-1.5">True Prob</th>
+                  <th className="text-right py-1.5">Edge</th>
+                  <th className="text-center py-1.5">Side</th>
+                  <th className="text-right py-1.5">Expires</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(momentumData?.opportunities ?? []).map((o: any, i: number) => (
+                  <tr key={i} className="border-b border-slate-800/50">
+                    <td className="py-1.5 text-white truncate max-w-[180px]" title={o.question}>
+                      {o.question?.substring(0, 50)}
+                    </td>
+                    <td className="py-1.5 text-center text-slate-300">{o.symbol}</td>
+                    <td className="py-1.5 text-center">
+                      <span className={o.direction === 'up' ? 'text-green-400' : 'text-red-400'}>
+                        {o.direction?.toUpperCase()}
+                      </span>
+                    </td>
+                    <td className="py-1.5 text-right text-slate-300">{(o.market_yes_price * 100).toFixed(1)}¢</td>
+                    <td className="py-1.5 text-right text-white">{(o.estimated_true_prob * 100).toFixed(1)}%</td>
+                    <td className="py-1.5 text-right"><EdgeBadge edge={o.edge_pct || 0} /></td>
+                    <td className="py-1.5 text-center">
+                      <span className={o.suggested_side === 'yes' ? 'text-green-400' : 'text-red-400'}>
+                        {o.suggested_side?.toUpperCase()}
+                      </span>
+                    </td>
+                    <td className="py-1.5 text-right text-slate-500">{o.minutes_to_expiry?.toFixed(1)}m</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <div className="mt-3 flex items-center justify-between text-xs text-slate-500">
+          <span>Active markets: {momentumData?.active_markets ?? 0}</span>
+          <span>Exposure: ${(momentumData?.total_exposure_usd ?? 0).toFixed(0)}</span>
+        </div>
+      </Card>
+
+      {/* Temporal Momentum Decision Log */}
+      {(momentumDecisions?.decisions ?? []).length > 0 && (
+        <Card title={`Temporal Momentum Decisions (${momentumDecisions?.decisions?.length ?? 0})`}>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-slate-400 border-b border-slate-800">
+                  <th className="w-6"></th>
+                  <th className="text-left py-2">Time</th>
+                  <th className="text-left py-2">Token</th>
+                  <th className="text-left py-2">Action</th>
+                  <th className="text-right py-2">Confidence</th>
+                  <th className="text-center py-2">Outcome</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(momentumDecisions?.decisions ?? []).map((d: any) => (
+                  <DecisionRow key={d.id} d={d} />
+                ))}
+              </tbody>
+            </table>
           </div>
         </Card>
       )}
