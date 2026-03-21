@@ -2,7 +2,7 @@ import { NavLink, Outlet } from 'react-router-dom';
 import {
   LayoutDashboard, LineChart, ArrowRightLeft, Globe,
   Radio, History, Settings, Wifi, WifiOff, Brain,
-  TrendingUp, TrendingDown, Bitcoin, BarChart3, Shield, FlaskConical, Target,
+  TrendingUp, TrendingDown, Bitcoin, BarChart3, Shield, FlaskConical, Target, BookOpen,
 } from 'lucide-react';
 import { useWebSocket } from '../hooks/useWebSocket';
 
@@ -22,6 +22,7 @@ const links = [
   { to: '/monitors', icon: Radio, label: 'Monitors' },
   { to: '/activity', icon: History, label: 'Activity' },
   { to: '/settings', icon: Settings, label: 'Settings' },
+  { to: '/guide', icon: BookOpen, label: 'Guide' },
 ];
 
 export default function Layout() {
