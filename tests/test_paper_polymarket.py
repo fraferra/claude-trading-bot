@@ -15,7 +15,7 @@ def broker(tmp_path, monkeypatch):
 
 @pytest.fixture
 def mock_market_data():
-    """Mock get_polymarket_data to avoid real API calls."""
+    """Mock API calls to avoid real network requests."""
     from trading_bot.models import PolymarketData
 
     mock_data = PolymarketData(
@@ -26,9 +26,11 @@ def mock_market_data():
         volume=50000.0,
         liquidity=10000.0,
     )
-    with patch("trading_bot.brokers.paper_polymarket.get_polymarket_data", new_callable=AsyncMock) as mock:
-        mock.return_value = mock_data
-        yield mock
+    with patch("trading_bot.brokers.paper_polymarket.get_polymarket_data", new_callable=AsyncMock) as mock_gd, \
+         patch("trading_bot.brokers.paper_polymarket._get_token_price", new_callable=AsyncMock) as mock_tp:
+        mock_gd.return_value = mock_data
+        mock_tp.return_value = 0.65
+        yield mock_gd
 
 
 @pytest.mark.asyncio

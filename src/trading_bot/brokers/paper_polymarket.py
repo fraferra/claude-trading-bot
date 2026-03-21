@@ -126,18 +126,23 @@ class PaperPolymarketBroker(BaseBroker):
         cid = order.symbol
         side_str = order.side.value
 
-        # Get current market price via CLOB midpoint (token_id-based)
+        # Get current market price via CLOB midpoint (token_id-based).
+        # Fall back to the order's limit_price if the CLOB API is unavailable —
+        # the caller already validated this price with a fresh quote.
         fill_price = await _get_token_price(cid)
         if fill_price is None:
-            log.error(f"Cannot get market price for token {cid}: midpoint returned None")
-            return OrderResult(
-                order_id=str(uuid4()),
-                symbol=cid,
-                side=order.side,
-                quantity=order.quantity,
-                status=OrderStatus.REJECTED,
-                platform=Platform.POLYMARKET,
-            )
+            if order.limit_price and 0.001 <= order.limit_price <= 0.999:
+                fill_price = order.limit_price
+            else:
+                log.error(f"Cannot get market price for token {cid}: midpoint returned None")
+                return OrderResult(
+                    order_id=str(uuid4()),
+                    symbol=cid,
+                    side=order.side,
+                    quantity=order.quantity,
+                    status=OrderStatus.REJECTED,
+                    platform=Platform.POLYMARKET,
+                )
 
         cost = order.quantity * fill_price
 
