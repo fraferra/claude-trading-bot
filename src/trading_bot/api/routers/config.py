@@ -41,6 +41,7 @@ class ConfigUpdate(BaseModel):
     stock_scorer: dict | None = None
     monitors: dict | None = None
     kalshi: dict | None = None
+    polymarket: dict | None = None
     crypto: dict | None = None
     shorts: dict | None = None
     drawdown_accumulation: dict | None = None
@@ -51,7 +52,7 @@ class ConfigUpdate(BaseModel):
 
 _CONFIG_SECTIONS = [
     "risk", "stocks", "run", "stock_scorer", "monitors",
-    "kalshi", "crypto", "shorts", "drawdown_accumulation",
+    "kalshi", "polymarket", "crypto", "shorts", "drawdown_accumulation",
     "position_guard", "telegram", "research_agent",
 ]
 

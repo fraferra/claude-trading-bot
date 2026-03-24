@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Save, Download, RotateCw } from 'lucide-react';
+import { Save, Download, RotateCw, Eye, EyeOff } from 'lucide-react';
 import { api } from '../api/client';
 import Card from '../components/Card';
 
@@ -42,6 +42,34 @@ function Toggle({ label, checked, onChange, help }: {
   );
 }
 
+function SecretField({ label, value, onChange, placeholder, help }: {
+  label: string; value: string; onChange: (v: string) => void; placeholder?: string; help?: string;
+}) {
+  const [show, setShow] = useState(false);
+  return (
+    <div>
+      <label className="block text-sm text-slate-400 mb-1">{label}</label>
+      <div className="relative">
+        <input
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          type={show ? 'text' : 'password'}
+          placeholder={placeholder}
+          className="w-full px-3 py-2 pr-9 bg-slate-800 border border-slate-700 rounded text-sm text-white"
+        />
+        <button
+          type="button"
+          onClick={() => setShow(s => !s)}
+          className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+        >
+          {show ? <EyeOff size={14} /> : <Eye size={14} />}
+        </button>
+      </div>
+      {help && <p className="text-xs text-slate-600 mt-0.5">{help}</p>}
+    </div>
+  );
+}
+
 /* ─── main component ───────────────────────────────────────────── */
 export default function SettingsPage() {
   const queryClient = useQueryClient();
@@ -79,6 +107,15 @@ export default function SettingsPage() {
   const [tgStopLoss, setTgStopLoss] = useState(true);
   const [tgDailySummary, setTgDailySummary] = useState(true);
   const [tgSummaryHour, setTgSummaryHour] = useState('17');
+
+  /* ── Polymarket ── */
+  const [pmPaper, setPmPaper] = useState(true);
+  const [pmPaperBalance, setPmPaperBalance] = useState('10000');
+  const [pmPrivateKey, setPmPrivateKey] = useState('');
+  const [pmApiKey, setPmApiKey] = useState('');
+  const [pmApiSecret, setPmApiSecret] = useState('');
+  const [pmApiPassphrase, setPmApiPassphrase] = useState('');
+  const [pmWsEnabled, setPmWsEnabled] = useState(false);
 
   /* ── Kalshi ── */
   const [kalshiEnabled, setKalshiEnabled] = useState(false);
@@ -153,6 +190,13 @@ export default function SettingsPage() {
     setTgDailySummary(tg.daily_summary ?? true);
     setTgSummaryHour(String(tg.daily_summary_hour ?? 17));
 
+    // Polymarket
+    const pm = config.polymarket ?? {};
+    setPmPaper(pm.paper ?? true);
+    setPmPaperBalance(String(pm.paper_balance ?? 10000));
+    // Credentials come back masked — leave input blank so user must re-enter to change
+    setPmWsEnabled(pm.ws_enabled ?? false);
+
     // Kalshi
     const k = config.kalshi ?? {};
     setKalshiEnabled(k.enabled ?? false);
@@ -217,6 +261,15 @@ export default function SettingsPage() {
         notify_stop_loss: tgStopLoss,
         daily_summary: tgDailySummary,
         daily_summary_hour: Number(tgSummaryHour),
+      },
+      polymarket: {
+        paper: pmPaper,
+        paper_balance: Number(pmPaperBalance),
+        ...(pmPrivateKey && { private_key: pmPrivateKey }),
+        ...(pmApiKey && { api_key: pmApiKey }),
+        ...(pmApiSecret && { api_secret: pmApiSecret }),
+        ...(pmApiPassphrase && { api_passphrase: pmApiPassphrase }),
+        ws_enabled: pmWsEnabled,
       },
       kalshi: {
         enabled: kalshiEnabled,
@@ -325,6 +378,34 @@ export default function SettingsPage() {
           </div>
           {tgDailySummary && (
             <InputField label="Summary Hour (24h)" value={tgSummaryHour} onChange={setTgSummaryHour} type="number" help="0-23, server timezone" />
+          )}
+        </div>
+      </Card>
+
+      {/* Polymarket */}
+      <Card title="Polymarket Account">
+        <div className="space-y-4">
+          <div className="flex items-center gap-4">
+            <Toggle label="Paper mode (simulated)" checked={pmPaper} onChange={setPmPaper} help="Disable to trade with real USDC" />
+            <Toggle label="WebSocket price feed" checked={pmWsEnabled} onChange={setPmWsEnabled} />
+          </div>
+          {pmPaper && (
+            <InputField label="Paper Balance (USD)" value={pmPaperBalance} onChange={setPmPaperBalance} type="number" help="Starting virtual balance" />
+          )}
+          {!pmPaper && (
+            <div className="space-y-3">
+              <div className="rounded-lg bg-yellow-950/40 border border-yellow-700/40 p-3 text-xs text-yellow-300">
+                <strong>Live mode:</strong> orders will execute on-chain via Polygon USDC. Set credentials below or use environment variables
+                (<code>POLYMARKET_PRIVATE_KEY</code>, <code>POLYMARKET_API_KEY</code>, etc.) which are preferred for security.
+                A server restart is required after switching modes.
+              </div>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <SecretField label="Private Key" value={pmPrivateKey} onChange={setPmPrivateKey} placeholder="0x… (leave blank to keep existing)" />
+                <SecretField label="API Key" value={pmApiKey} onChange={setPmApiKey} placeholder="Leave blank to keep existing" />
+                <SecretField label="API Secret" value={pmApiSecret} onChange={setPmApiSecret} placeholder="Leave blank to keep existing" />
+                <SecretField label="API Passphrase" value={pmApiPassphrase} onChange={setPmApiPassphrase} placeholder="Leave blank to keep existing" />
+              </div>
+            </div>
           )}
         </div>
       </Card>

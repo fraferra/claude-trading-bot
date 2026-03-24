@@ -17,6 +17,7 @@ import RiskDashboard from './pages/RiskDashboard';
 import Backtest from './pages/Backtest';
 import Polymarket from './pages/Polymarket';
 import Guide from './pages/Guide';
+import ArbDashboard from './pages/ArbDashboard';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -50,6 +51,7 @@ export default function App() {
             <Route path="/activity" element={<Activity />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/guide" element={<Guide />} />
+            <Route path="/arb" element={<ArbDashboard />} />
           </Route>
         </Routes>
       </BrowserRouter>
