@@ -65,24 +65,45 @@ class MonitorManager:
         self._counter = 0
 
     async def restore_from_db(self) -> None:
-        """On startup, restore previously-running monitors."""
+        """On startup, restore previously-running monitors.
+
+        Only one instance per monitor type is restored — the most recently
+        created one. Duplicates (from previous manual starts) are skipped to
+        prevent redundant parallel execution.
+        """
         states = await self.repo.get_all_monitor_states()
+
+        # Sync _counter to avoid ID collisions with previously-created monitors
         for state in states:
-            # Sync _counter to avoid ID collisions with previously-created monitors
             mid = state["monitor_id"]
             parts = mid.rsplit("_", 1)
             if len(parts) == 2 and parts[1].isdigit():
                 self._counter = max(self._counter, int(parts[1]))
 
-            if state["status"] == "running":
-                try:
-                    monitor = self._create_monitor(state["monitor_type"], mid)
-                    if monitor:
-                        self._monitors[mid] = monitor
-                        await monitor.start()
-                        log.info(f"Restored monitor: {mid}")
-                except Exception as e:
-                    log.warning(f"Failed to restore monitor {mid}: {e}")
+        # Keep only the latest (highest counter) running state per type
+        running_by_type: dict[str, dict] = {}
+        for state in states:
+            if state["status"] != "running":
+                continue
+            mtype = state["monitor_type"]
+            mid = state["monitor_id"]
+            parts = mid.rsplit("_", 1)
+            num = int(parts[1]) if len(parts) == 2 and parts[1].isdigit() else 0
+            if mtype not in running_by_type or num > int(
+                running_by_type[mtype]["monitor_id"].rsplit("_", 1)[-1] or 0
+            ):
+                running_by_type[mtype] = state
+
+        for state in running_by_type.values():
+            mid = state["monitor_id"]
+            try:
+                monitor = self._create_monitor(state["monitor_type"], mid)
+                if monitor:
+                    self._monitors[mid] = monitor
+                    await monitor.start()
+                    log.info(f"Restored monitor: {mid}")
+            except Exception as e:
+                log.warning(f"Failed to restore monitor {mid}: {e}")
 
     def _create_monitor(self, monitor_type: str, monitor_id: str) -> BaseMonitor | None:
         cls = MONITOR_TYPES.get(monitor_type)

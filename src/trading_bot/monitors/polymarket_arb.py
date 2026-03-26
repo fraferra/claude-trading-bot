@@ -268,6 +268,10 @@ class PolymarketArbMonitor(BaseMonitor):
             if err or trade_result is None:
                 log.warning(f"PolymarketArb leg failed for {token_id}: {err}")
                 continue
+            from trading_bot.models import OrderStatus
+            if trade_result.status == OrderStatus.REJECTED:
+                log.warning(f"PolymarketArb leg rejected for {token_id}: order was rejected by broker")
+                continue
 
             condition_id = outcome.get("condition_id", token_id)
             trade_id = await self.repo.insert_trade(
