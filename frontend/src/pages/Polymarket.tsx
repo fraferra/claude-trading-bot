@@ -199,6 +199,7 @@ export default function Polymarket() {
   const wins = settledList.filter((s: any) => s.total_pnl > 0).length;
   const losses = settledList.filter((s: any) => s.total_pnl <= 0).length;
   const hasPortfolio = portfolio && !portfolio.error;
+  const isPaper = portfolio?.is_paper !== false; // default to paper if unknown
 
   // Unrealized P&L = sum of position-level unrealized P&L from live market prices
   const unrealizedPnl = positions.reduce((s: number, p: any) => s + (p.unrealized_pnl || 0), 0);
@@ -208,7 +209,12 @@ export default function Polymarket() {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-white">Polymarket Arbitrage</h1>
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-bold text-white">Polymarket Arbitrage</h1>
+          <span className={`px-2 py-0.5 rounded text-xs font-medium ${isPaper ? 'bg-yellow-500/20 text-yellow-400' : 'bg-green-500/20 text-green-400'}`}>
+            {isPaper ? 'Paper' : 'Live'}
+          </span>
+        </div>
         <div className="flex gap-2">
           <button
             onClick={() => arbScanMut.mutate()}

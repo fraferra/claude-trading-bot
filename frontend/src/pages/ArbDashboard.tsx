@@ -346,6 +346,7 @@ function MomentumTab() {
 export default function ArbDashboard() {
   const [tab, setTab] = useState<Tab>('multi');
 
+  const { data: portfolio } = useQuery({ queryKey: ['arb-portfolio'], queryFn: api.getPolymarketPortfolio, refetchInterval: 30_000 });
   const { data: pnlHistory } = useQuery({ queryKey: ['arb-pnl'], queryFn: api.getPolymarketPnlHistory, refetchInterval: 30_000 });
   const { data: settlements } = useQuery({ queryKey: ['arb-settlements'], queryFn: () => api.getPolymarketSettlements(100), refetchInterval: 30_000 });
   const { data: monitors } = useQuery({ queryKey: ['arb-monitors'], queryFn: api.getPolymarketMonitorStats, refetchInterval: 10_000 });
@@ -367,6 +368,7 @@ export default function ArbDashboard() {
   ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
   const activeMonitors: any[] = monitors?.monitors?.filter((m: any) => m.status === 'running') ?? [];
+  const isPaper = portfolio?.is_paper !== false;
 
   // P&L chart data
   const chartData = (pnlHistory?.pnl_history ?? []).map((p: any) => ({
@@ -382,12 +384,17 @@ export default function ArbDashboard() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-xl font-bold text-white flex items-center gap-2">
-          <Zap size={20} className="text-yellow-400" />
-          Arbitrage Dashboard
-        </h2>
-        <p className="text-slate-400 text-sm mt-0.5">Live monitoring across all three arb strategies</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-xl font-bold text-white flex items-center gap-2">
+            <Zap size={20} className="text-yellow-400" />
+            Arbitrage Dashboard
+            <span className={`ml-1 px-2 py-0.5 rounded text-xs font-medium ${isPaper ? 'bg-yellow-500/20 text-yellow-400' : 'bg-green-500/20 text-green-400'}`}>
+              {isPaper ? 'Paper' : 'Live'}
+            </span>
+          </h2>
+          <p className="text-slate-400 text-sm mt-0.5">Live monitoring across all three arb strategies</p>
+        </div>
       </div>
 
       {/* Summary stats */}

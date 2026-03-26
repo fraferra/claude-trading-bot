@@ -18,7 +18,11 @@ async def get_polymarket_portfolio(request: Request):
         return {"error": "Polymarket broker not configured"}
     try:
         portfolio = await broker.get_account()
-        return portfolio.model_dump()
+        data = portfolio.model_dump()
+        # Expose paper/live mode so dashboards can show the correct badge
+        from trading_bot.brokers.paper_polymarket import PaperPolymarketBroker
+        data["is_paper"] = isinstance(broker, PaperPolymarketBroker)
+        return data
     except Exception as e:
         return {"error": f"Polymarket API error: {str(e)}"}
 
