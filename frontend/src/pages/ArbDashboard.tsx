@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  Zap, RefreshCw, TrendingUp, DollarSign, BarChart2, CheckCircle,
-  ChevronDown, ChevronRight, ArrowUpDown, Globe, Activity,
+  Zap, RefreshCw, BarChart2,
+  ChevronDown, ChevronRight, ArrowUpDown, Activity,
 } from 'lucide-react';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
