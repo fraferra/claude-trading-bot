@@ -39,7 +39,6 @@ BINANCE_TO_LABEL: dict[str, str] = {
 _CRYPTO_PATTERN = re.compile(
     r"(btc|bitcoin|eth|ethereum|sol|solana)", re.I
 )
-_TIME_PATTERN = re.compile(r"(\d+)\s*[-\s]?\s*min", re.I)
 
 
 # ---------------------------------------------------------------------------
@@ -537,13 +536,6 @@ def _parse_crypto_market(
     elif symbol_text in ("sol", "solana"):
         symbol = "SOL"
     else:
-        return None
-
-    # Must mention a minute-resolution timeframe (≤ 30 min)
-    time_match = _TIME_PATTERN.search(question)
-    if not time_match:
-        return None
-    if int(time_match.group(1)) > 30:
         return None
 
     # Check expiry

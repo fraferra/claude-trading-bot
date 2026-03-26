@@ -15,7 +15,7 @@ risk:
   max_total_exposure_pct: 0.80  # Max 80% total invested
   daily_loss_limit_pct: 0.03    # Stop trading if daily loss > 3%
   min_confidence: 0.60          # Reject decisions below 60% confidence
-  max_trades_per_day: 10        # Max trades per day
+  max_trades_per_day: 50        # Max trades per day (arb strategies are hedged)
 
 # Alpaca settings
 alpaca:
@@ -222,6 +222,20 @@ telegram:
   notify_stop_loss: true
   daily_summary: true
   daily_summary_hour: 17
+
+# Temporal momentum arbitrage (Binance spot price lag vs Polymarket crypto binary markets)
+temporal_momentum:
+  paper: false                        # Use live broker (falls back to paper if no credentials)
+  scan_interval_seconds: 2            # Inner loop cadence
+  max_minutes_to_expiry: 480.0        # Up to 8 hours — catches end-of-day crypto markets
+  min_minutes_to_expiry: 5.0          # Avoid markets about to expire
+  min_edge_pct: 0.08                  # 8% edge (down from 15%)
+  momentum_strength_threshold: 0.50   # 0.5 composite score (down from 0.65)
+  min_price_change_1m_pct: 0.002      # 0.2% 1-min move (down from 0.3%)
+  max_size_usd: 200.0                 # $200 max per trade
+  max_total_exposure_usd: 2000.0      # $2K max total exposure
+  min_volume_usd: 5000.0              # $5K min market volume
+  frontrun_enabled: false             # Disable front-running for now
 
 # Autonomous research agent
 research_agent:
