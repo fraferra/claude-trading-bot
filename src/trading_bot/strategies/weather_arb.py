@@ -82,6 +82,8 @@ class WeatherMarketSignal:
         city: str,
         target_date: date | None,
         forecast_detail: str,
+        yes_token_id: str = "",
+        no_token_id: str = "",
     ) -> None:
         self.condition_id = condition_id
         self.question = question
@@ -93,8 +95,10 @@ class WeatherMarketSignal:
         self.city = city
         self.target_date = target_date
         self.forecast_detail = forecast_detail
+        self.yes_token_id = yes_token_id
+        self.no_token_id = no_token_id
 
-        # Edge = NOAA probability - market YES price (positive → buy YES)
+        # Edge = NOAA probability - market YES price (positive → buy YES, negative → buy NO)
         self.edge = noaa_prob - yes_price
 
     @property
@@ -102,12 +106,30 @@ class WeatherMarketSignal:
         return abs(self.edge)
 
     @property
+    def is_no_bet(self) -> bool:
+        """True when NOAA probability < market YES price (buy NO is the trade)."""
+        return self.edge < 0
+
+    @property
     def suggested_side(self) -> Side:
-        return Side.BUY if self.edge > 0 else Side.SELL
+        # Always BUY — either the YES token or the NO token
+        return Side.BUY
 
     @property
     def suggested_action(self) -> Action:
-        return Action.BUY if self.edge > 0 else Action.SELL
+        return Action.BUY
+
+    @property
+    def trade_token_id(self) -> str:
+        """The token_id to submit the order against (YES or NO token)."""
+        if self.is_no_bet:
+            return self.no_token_id or self.condition_id
+        return self.yes_token_id or self.condition_id
+
+    @property
+    def trade_price(self) -> float:
+        """The market price of the token being bought."""
+        return self.no_price if self.is_no_bet else self.yes_price
 
     @property
     def confidence(self) -> float:
@@ -115,7 +137,7 @@ class WeatherMarketSignal:
         return round(min(0.95, 0.60 + self.abs_edge * 1.2), 4)
 
     def to_reasoning(self) -> str:
-        side_str = "BUY YES" if self.edge > 0 else "BUY NO"
+        side_str = "BUY NO" if self.is_no_bet else "BUY YES"
         return (
             f"[WEATHER|{self.city}] {self.event_type} | "
             f"NOAA={self.noaa_prob:.1%} vs market={self.yes_price:.1%} | "
@@ -243,6 +265,8 @@ class WeatherArbScanner:
                     outcome.yes_price,
                     outcome.no_price,
                     event.end_date,
+                    outcome.token_id,
+                    outcome.no_token_id,
                 ))
 
         log.info(f"WeatherArbScanner: {len(weather_markets)} weather markets in time window")
@@ -251,7 +275,7 @@ class WeatherArbScanner:
         city_forecasts: dict[str, CityForecast | None] = {}
         signals: list[WeatherMarketSignal] = []
 
-        for condition_id, question, yes_price, no_price, end_date in weather_markets:
+        for condition_id, question, yes_price, no_price, end_date, yes_token_id, no_token_id in weather_markets:
             try:
                 noaa_prob, event_type, city_name, target_date, detail = await _fetch_noaa_for_market(
                     question, end_date, city_forecasts
@@ -274,6 +298,8 @@ class WeatherArbScanner:
                 city=city_name,
                 target_date=target_date,
                 forecast_detail=detail,
+                yes_token_id=yes_token_id,
+                no_token_id=no_token_id,
             )
 
             if signal.abs_edge >= self.config.min_edge_pct:
@@ -312,7 +338,7 @@ class WeatherArbScanner:
     def _signal_to_decision(self, signal: WeatherMarketSignal) -> TradeDecision:
         return TradeDecision(
             action=signal.suggested_action,
-            symbol=signal.condition_id,
+            symbol=signal.trade_token_id,
             confidence=signal.confidence,
             reasoning=signal.to_reasoning(),
             suggested_size_usd=self.config.max_size_usd,

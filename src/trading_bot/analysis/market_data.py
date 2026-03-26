@@ -256,6 +256,7 @@ def parse_event_to_model(raw_event: dict) -> EventData:
         yes_price = 0.5
         no_price = 0.5
         token_id = ""
+        no_token_id = ""
         for t in tokens:
             outcome_str = t.get("outcome", "").lower()
             price = float(t.get("price", 0.5))
@@ -264,6 +265,7 @@ def parse_event_to_model(raw_event: dict) -> EventData:
                 token_id = t.get("token_id", "")
             elif outcome_str == "no":
                 no_price = price
+                no_token_id = t.get("token_id", "")
 
         outcomes.append(MarketOutcome(
             condition_id=m.get("conditionId", m.get("condition_id", "")),
@@ -272,6 +274,7 @@ def parse_event_to_model(raw_event: dict) -> EventData:
             yes_price=round(yes_price, 4),
             no_price=round(no_price, 4),
             token_id=token_id,
+            no_token_id=no_token_id,
             liquidity=float(m.get("liquidity", 0)),
         ))
 

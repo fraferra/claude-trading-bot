@@ -126,6 +126,14 @@ class KalshiArbitrageScanner:
         if n < self.config.min_markets or n > self.config.max_markets:
             return None
 
+        # All markets in the MECE set must survive filtering; partial sets produce phantom arbs
+        if n != len(event.markets):
+            log.debug(
+                f"Skipping {event.event_ticker}: {len(event.markets) - n} "
+                f"market(s) excluded due to filtering"
+            )
+            return None
+
         price_sum = sum(m.yes_price for m in valid_markets)
 
         # Sanity bounds: if prices don't vaguely sum to 1.0, skip

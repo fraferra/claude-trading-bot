@@ -484,21 +484,30 @@ class TemporalMomentumMonitor(BaseMonitor):
                         if result_outcome is None:
                             continue
 
+                        # Determine whether the traded token is YES or NO
+                        token_outcome = "yes"
+                        for token in market.get("tokens", []):
+                            if token.get("token_id") == token_id:
+                                token_outcome = token.get("outcome", "yes").lower()
+                                break
+
                         entry_price = trade["filled_price"] or 0.0
                         qty = trade["quantity"]
                         side = trade["side"]
                         condition_id = market.get("condition_id", "")
 
+                        # Token pays $1 if its outcome matches the result, $0 otherwise
+                        token_won = (token_outcome == result_outcome)
                         if side == "buy":
                             payout_per = (
                                 (1.0 - entry_price)
-                                if result_outcome == "yes"
+                                if token_won
                                 else -entry_price
                             )
                         else:
                             payout_per = (
                                 entry_price
-                                if result_outcome == "no"
+                                if not token_won
                                 else -(1.0 - entry_price)
                             )
 

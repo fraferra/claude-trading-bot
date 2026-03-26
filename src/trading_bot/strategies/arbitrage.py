@@ -105,6 +105,14 @@ class ArbitrageScanner(BaseStrategy):
         if len(valid_outcomes) < 2:
             return None
 
+        # All outcomes must survive filtering; partial MECE sets produce phantom arbs
+        if len(valid_outcomes) != len(outcomes):
+            log.debug(
+                f"Skipping {event.event_id}: {len(outcomes) - len(valid_outcomes)} "
+                f"outcome(s) excluded due to zero liquidity/price"
+            )
+            return None
+
         price_sum = sum(o.yes_price for o in valid_outcomes)
 
         raw_edge = abs(1.0 - price_sum)

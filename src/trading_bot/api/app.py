@@ -26,12 +26,21 @@ def _build_brokers(config: Config) -> dict:
         from trading_bot.brokers.alpaca_broker import AlpacaBroker
         brokers["alpaca"] = AlpacaBroker(config.alpaca)
 
-    if config.polymarket.paper:
+    poly = config.polymarket
+    if poly.paper:
         from trading_bot.brokers.paper_polymarket import PaperPolymarketBroker
-        brokers["polymarket"] = PaperPolymarketBroker(config.polymarket.paper_balance)
-    elif config.polymarket.private_key:
+        brokers["polymarket"] = PaperPolymarketBroker(poly.paper_balance)
+    elif poly.private_key and poly.api_key and poly.api_secret and poly.api_passphrase:
         from trading_bot.brokers.polymarket_broker import PolymarketBroker
-        brokers["polymarket"] = PolymarketBroker(config.polymarket)
+        brokers["polymarket"] = PolymarketBroker(poly)
+    else:
+        log.warning(
+            "Polymarket paper=false but credentials are missing — falling back to paper mode. "
+            "Set POLYMARKET_PRIVATE_KEY, POLYMARKET_API_KEY, POLYMARKET_API_SECRET, "
+            "POLYMARKET_API_PASSPHRASE in .env for live trading."
+        )
+        from trading_bot.brokers.paper_polymarket import PaperPolymarketBroker
+        brokers["polymarket"] = PaperPolymarketBroker(poly.paper_balance)
 
     if config.kalshi.api_key_id and config.kalshi.private_key:
         from trading_bot.brokers.kalshi_broker import KalshiBroker

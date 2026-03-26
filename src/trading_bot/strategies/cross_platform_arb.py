@@ -146,7 +146,6 @@ class CrossPlatformArbScanner:
         # poly_market is a raw Gamma API market dict
         tokens = poly_market.get("tokens", [])
         poly_yes_price = 0.5
-        poly_no_price = 0.5
         poly_token_yes = ""
         for token in tokens:
             outcome = token.get("outcome", "").lower()
@@ -154,8 +153,9 @@ class CrossPlatformArbScanner:
             if outcome == "yes":
                 poly_yes_price = price
                 poly_token_yes = token.get("token_id", "")
-            elif outcome == "no":
-                poly_no_price = price
+
+        # Derive NO price from YES price to ensure internal consistency
+        poly_no_price = 1.0 - poly_yes_price
 
         # Get Kalshi prices (fresh quote)
         try:

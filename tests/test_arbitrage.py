@@ -96,8 +96,8 @@ class TestCheckEvent:
         event = _make_event([0.20, 0.20, 0.20, 0.20])
         assert scanner._check_event(event) is None
 
-    def test_zero_liquidity_filtered(self):
-        """Outcomes with zero liquidity are excluded from the sum."""
+    def test_zero_liquidity_skips_entire_event(self):
+        """If any outcome has zero liquidity, the whole event is skipped to avoid phantom arbs."""
         config = _make_config(min_edge_pct=0.02, fee_estimate_pct=0.01)
         scanner = ArbitrageScanner(config)
 
@@ -108,10 +108,8 @@ class TestCheckEvent:
         ]
         event = EventData(event_id="e1", title="Test", outcomes=outcomes)
         opp = scanner._check_event(event)
-        # Only c0 and c1 are valid → sum = 0.80, raw_edge=0.20, fees=0.02, net=0.18
-        assert opp is not None
-        assert len(opp.outcomes) == 2
-        assert opp.price_sum == pytest.approx(0.80, abs=0.001)
+        # Partial MECE set (1 outcome excluded) must be rejected
+        assert opp is None
 
     def test_opportunity_to_decisions(self):
         """Verify trade decisions are generated correctly from an opportunity."""

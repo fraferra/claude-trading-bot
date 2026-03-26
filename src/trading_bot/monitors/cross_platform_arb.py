@@ -16,6 +16,8 @@ from __future__ import annotations
 import asyncio
 import json
 
+import httpx
+
 from trading_bot.models import (
     OrderRequest,
     OrderType,
@@ -274,11 +276,14 @@ class CrossPlatformArbMonitor(BaseMonitor):
 
         if (poly_err or poly_result is None) and (kalshi_err or kalshi_result is None):
             log.warning("CrossPlatformArb: BOTH legs failed — no position taken")
-        elif poly_err or kalshi_err:
-            log.warning(
-                "CrossPlatformArb: PARTIAL ARB — only one leg filled. "
-                "Position is directional, not hedged."
-            )
+        elif (poly_result is not None and not poly_err) and (kalshi_err or kalshi_result is None):
+            # Poly filled, Kalshi failed — unwind Poly to avoid directional exposure
+            log.warning("CrossPlatformArb: Kalshi leg failed, unwinding Poly leg")
+            await self._unwind_order(poly_broker, poly_result, poly_order, Platform.POLYMARKET)
+        elif (kalshi_result is not None and not kalshi_err) and (poly_err or poly_result is None):
+            # Kalshi filled, Poly failed — unwind Kalshi
+            log.warning("CrossPlatformArb: Poly leg failed, unwinding Kalshi leg")
+            await self._unwind_order(kalshi_broker, kalshi_result, kalshi_order, Platform.KALSHI)
         else:
             log.info(
                 f"CrossPlatformArb: both legs filled, "
@@ -299,21 +304,42 @@ class CrossPlatformArbMonitor(BaseMonitor):
                     if not is_settled:
                         continue
 
+                    # Determine whether the traded token is YES or NO
+                    token_id = trade["symbol"]
+                    token_outcome = "yes"
+                    try:
+                        async with httpx.AsyncClient(timeout=10.0) as http:
+                            resp = await http.get(
+                                "https://clob.polymarket.com/markets",
+                                params={"clob_token_ids": token_id},
+                            )
+                            if resp.status_code == 200:
+                                markets = resp.json()
+                                mkt = markets[0] if isinstance(markets, list) and markets else {}
+                                for token in mkt.get("tokens", []):
+                                    if token.get("token_id") == token_id:
+                                        token_outcome = token.get("outcome", "yes").lower()
+                                        break
+                    except Exception:
+                        pass
+
                     entry_price = trade["filled_price"] or 0.0
                     qty = trade["quantity"]
                     side = trade["side"]
 
+                    # Token pays $1 if its outcome matches the result, $0 otherwise
+                    token_won = (token_outcome == result)
                     if side == "buy":
-                        payout_per = (1.0 - entry_price) if result == "yes" else -entry_price
+                        payout_per = (1.0 - entry_price) if token_won else -entry_price
                     else:
-                        payout_per = entry_price if result == "no" else -(1.0 - entry_price)
+                        payout_per = entry_price if not token_won else -(1.0 - entry_price)
 
                     total_pnl = payout_per * qty
 
                     await self.repo.insert_polymarket_settlement(
                         trade_id=trade["id"],
                         condition_id="",
-                        token_id=trade["symbol"],
+                        token_id=token_id,
                         side=side,
                         quantity=qty,
                         entry_price=entry_price,
@@ -322,6 +348,9 @@ class CrossPlatformArbMonitor(BaseMonitor):
                         total_pnl=round(total_pnl, 2),
                     )
                     await self.repo.increment_monitor_trade(self.monitor_id, pnl=total_pnl)
+                    poly_broker_ref = self.brokers.get("polymarket")
+                    if poly_broker_ref and hasattr(poly_broker_ref, "record_settlement_pnl"):
+                        poly_broker_ref.record_settlement_pnl(total_pnl)
 
                     log.info(
                         f"CrossPlatformArb Poly settlement: {trade['symbol'][:20]} "
@@ -380,6 +409,36 @@ class CrossPlatformArbMonitor(BaseMonitor):
                     log.debug(f"CrossPlatformArb Kalshi settlement check failed: {e}")
         except Exception as e:
             log.warning(f"CrossPlatformArb Kalshi settlement error: {e}")
+
+    async def _unwind_order(self, broker, result, original_order: OrderRequest, platform: Platform) -> None:
+        """Cancel or close a filled leg when its counterpart leg failed."""
+        from trading_bot.models import OrderStatus
+        try:
+            cancelled = await broker.cancel_order(result.order_id)
+            if cancelled:
+                log.info(f"CrossPlatformArb: cancelled pending {platform.value} order {result.order_id}")
+                return
+            # Order already filled — submit a closing order in the opposite direction
+            if result.status == OrderStatus.FILLED:
+                close_side = Side.SELL if original_order.side == Side.BUY else Side.BUY
+                close_order = OrderRequest(
+                    symbol=original_order.symbol,
+                    side=close_side,
+                    quantity=original_order.quantity,
+                    order_type=OrderType.LIMIT,
+                    limit_price=original_order.limit_price,
+                    platform=platform,
+                )
+                await broker.submit_order(close_order)
+                log.info(
+                    f"CrossPlatformArb: closed {platform.value} leg {original_order.symbol} "
+                    f"({close_side.value} {original_order.quantity:.4f})"
+                )
+        except Exception as e:
+            log.error(
+                f"CrossPlatformArb: FAILED to unwind {platform.value} leg "
+                f"{original_order.symbol}: {e} — manual intervention may be required"
+            )
 
 
 def _parse_kalshi_price(reasoning: str) -> float:

@@ -40,9 +40,21 @@ def _build_polymarket_broker(config: Config):
     if config.polymarket.paper:
         from trading_bot.brokers.paper_polymarket import PaperPolymarketBroker
         return PaperPolymarketBroker(config.polymarket.paper_balance)
-    else:
-        from trading_bot.brokers.polymarket_broker import PolymarketBroker
-        return PolymarketBroker(config.polymarket)
+
+    poly = config.polymarket
+    has_credentials = poly.private_key and poly.api_key and poly.api_secret and poly.api_passphrase
+    if not has_credentials:
+        from trading_bot.utils.logging import log
+        log.warning(
+            "Polymarket paper=false but credentials are missing "
+            "(POLYMARKET_PRIVATE_KEY, POLYMARKET_API_KEY, POLYMARKET_API_SECRET, "
+            "POLYMARKET_API_PASSPHRASE). Falling back to paper mode."
+        )
+        from trading_bot.brokers.paper_polymarket import PaperPolymarketBroker
+        return PaperPolymarketBroker(poly.paper_balance)
+
+    from trading_bot.brokers.polymarket_broker import PolymarketBroker
+    return PolymarketBroker(poly)
 
 
 def _build_risk_manager(config: Config):

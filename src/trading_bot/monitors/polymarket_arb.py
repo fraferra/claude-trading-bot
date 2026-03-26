@@ -390,17 +390,24 @@ class PolymarketArbMonitor(BaseMonitor):
                         if result is None:
                             continue
 
+                        # Determine whether the traded token is YES or NO
+                        token_outcome = "yes"
+                        for token in tokens:
+                            if token.get("token_id") == token_id:
+                                token_outcome = token.get("outcome", "yes").lower()
+                                break
+
                         entry_price = trade["filled_price"] or 0.0
                         qty = trade["quantity"]
                         side = trade["side"]
                         condition_id = market.get("condition_id", market.get("conditionId", ""))
 
+                        # Token pays $1 if its outcome matches the result, $0 otherwise
+                        token_won = (token_outcome == result)
                         if side == "buy":
-                            # Bought YES at entry_price — worth $1.00 if YES wins, $0 if NO wins
-                            payout_per = (1.0 - entry_price) if result == "yes" else -entry_price
+                            payout_per = (1.0 - entry_price) if token_won else -entry_price
                         else:
-                            # Sold YES at entry_price — collect entry_price if NO wins
-                            payout_per = entry_price if result == "no" else -(1.0 - entry_price)
+                            payout_per = entry_price if not token_won else -(1.0 - entry_price)
 
                         total_pnl = payout_per * qty
 
@@ -417,6 +424,8 @@ class PolymarketArbMonitor(BaseMonitor):
                         )
 
                         await self.repo.increment_monitor_trade(self.monitor_id, pnl=total_pnl)
+                        if hasattr(broker, "record_settlement_pnl"):
+                            broker.record_settlement_pnl(total_pnl)
 
                         await self.repo.insert_agent_decision(
                             agent_type="polymarket_arb",

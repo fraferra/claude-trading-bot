@@ -164,7 +164,8 @@ class MarketOutcome(BaseModel):
     outcome_label: str = ""
     yes_price: float
     no_price: float
-    token_id: str = ""
+    token_id: str = ""        # YES token_id
+    no_token_id: str = ""     # NO token_id
     liquidity: float = 0.0
 
 

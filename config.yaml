@@ -25,8 +25,8 @@ alpaca:
 
 # Polymarket settings
 polymarket:
-  paper: true
-  paper_balance: 10000.0  # Starting virtual USDC balance
+  paper: false  # Live mode — falls back to paper if credentials missing
+  paper_balance: 10000.0  # Starting virtual USDC balance (used as fallback)
 
 # Stock analysis defaults
 stocks:

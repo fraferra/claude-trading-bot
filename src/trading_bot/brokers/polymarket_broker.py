@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
+from datetime import date, datetime
 from functools import partial
 from uuid import uuid4
 
@@ -47,6 +47,8 @@ class PolymarketBroker(BaseBroker):
                 "passphrase": config.api_passphrase,
             },
         )
+        self._daily_pnl: float = 0.0
+        self._daily_pnl_date: date = date.today()
         log.info("Polymarket LIVE broker initialized")
 
     async def get_account(self) -> PortfolioSummary:
@@ -59,14 +61,14 @@ class PolymarketBroker(BaseBroker):
             cash=cash,
             equity=total_value + cash,
             positions=positions,
-            daily_pnl=0.0,
+            daily_pnl=self._get_daily_pnl(),
             platform=Platform.POLYMARKET,
         )
 
     async def _get_usdc_balance(self) -> float:
         """Fetch USDC.e balance from CLOB API."""
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             balance_data = await loop.run_in_executor(None, self.client.get_balance_allowance)
             if isinstance(balance_data, dict):
                 # Returns asset balances; USDC/collateral is the cash balance
@@ -76,9 +78,25 @@ class PolymarketBroker(BaseBroker):
             log.debug(f"Polymarket balance fetch failed: {e}")
         return 0.0
 
+    def _get_daily_pnl(self) -> float:
+        """Return today's running P&L, resetting the counter at midnight."""
+        today = date.today()
+        if today != self._daily_pnl_date:
+            self._daily_pnl = 0.0
+            self._daily_pnl_date = today
+        return self._daily_pnl
+
+    def record_settlement_pnl(self, pnl: float) -> None:
+        """Called by settlement monitors to accumulate realized P&L for the daily loss check."""
+        today = date.today()
+        if today != self._daily_pnl_date:
+            self._daily_pnl = 0.0
+            self._daily_pnl_date = today
+        self._daily_pnl += pnl
+
     async def get_positions(self) -> list[Position]:
         """Fetch open positions from Polymarket using the positions endpoint."""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         try:
             # Try the dedicated positions endpoint first
@@ -154,7 +172,7 @@ class PolymarketBroker(BaseBroker):
 
     async def submit_order(self, order: OrderRequest) -> OrderResult:
         """Submit a limit order on Polymarket."""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         token_id = order.symbol
         side_str = "BUY" if order.side == Side.BUY else "SELL"
@@ -210,7 +228,7 @@ class PolymarketBroker(BaseBroker):
             )
 
     async def cancel_order(self, order_id: str) -> bool:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         try:
             await loop.run_in_executor(
                 None, partial(self.client.cancel, order_id)
@@ -222,7 +240,7 @@ class PolymarketBroker(BaseBroker):
             return False
 
     async def get_order_status(self, order_id: str) -> OrderStatus:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         try:
             order = await loop.run_in_executor(
                 None, partial(self.client.get_order, order_id)
