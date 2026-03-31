@@ -124,6 +124,13 @@ class ArbitrageScanner(BaseStrategy):
         total_fees = self.arb_config.fee_estimate_pct * len(valid_outcomes)
         net_edge = raw_edge - total_fees
 
+        # Log near-misses so we can see what's close to qualifying
+        if net_edge < self.arb_config.min_edge_pct and raw_edge > 0.005:
+            log.info(
+                f"Near-miss arb: {event.title[:50]} sum={price_sum:.4f} "
+                f"net_edge={net_edge:.3f} ({len(valid_outcomes)} outcomes)"
+            )
+
         if net_edge < self.arb_config.min_edge_pct:
             return None
 
