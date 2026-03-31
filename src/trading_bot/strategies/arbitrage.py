@@ -115,6 +115,11 @@ class ArbitrageScanner(BaseStrategy):
 
         price_sum = sum(o.yes_price for o in valid_outcomes)
 
+        # MECE price_sum should be close to 1.0; >2.0 means corrupt CLOB data
+        if price_sum > 2.0:
+            log.debug(f"Skipping {event.event_id}: price_sum={price_sum:.4f} > 2.0, likely corrupt data")
+            return None
+
         raw_edge = abs(1.0 - price_sum)
         total_fees = self.arb_config.fee_estimate_pct * len(valid_outcomes)
         net_edge = raw_edge - total_fees

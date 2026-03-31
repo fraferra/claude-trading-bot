@@ -187,6 +187,16 @@ class PolymarketArbMonitor(BaseMonitor):
             return
 
         fresh_sum = sum(p for _, p, _ in valid)
+
+        # Sanity check: MECE price_sum should be close to 1.0.
+        # sum > 2.0 means corrupt/stale CLOB data — skip to avoid phantom arbs.
+        if fresh_sum > 2.0:
+            log.info(
+                f"PolymarketArb: price_sum={fresh_sum:.4f} looks like corrupt data "
+                f"for {event_title}, skipping"
+            )
+            return
+
         raw_edge = abs(1.0 - fresh_sum)
         total_fees = self.config.strategies.arbitrage.fee_estimate_pct * len(valid)
         fresh_net_edge = raw_edge - total_fees
@@ -197,6 +207,19 @@ class PolymarketArbMonitor(BaseMonitor):
                 f"(fresh_sum={fresh_sum:.4f}, net_edge={fresh_net_edge:.4f}), skipping"
             )
             return
+
+        # sell_all requires holding positions in every token; skip if we hold none
+        # (opening new positions via SELL is invalid — you'd be shorting tokens you don't own)
+        if direction == "sell_all":
+            held_tokens = {p.symbol for p in portfolio.positions}
+            tradeable = [(t, p, o) for t, p, o in valid if t in held_tokens]
+            if not tradeable:
+                log.info(
+                    f"PolymarketArb: sell_all skipped for {event_title} — "
+                    f"no positions held in any of the {len(valid)} outcome tokens"
+                )
+                return
+            valid = tradeable
 
         cfg = self.config.strategies.arbitrage
         per_leg_usd = cfg.max_size_per_leg_usd * scale
