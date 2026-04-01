@@ -226,21 +226,44 @@ async def search_polymarket_markets(query: str, limit: int = 10) -> list[dict]:
 
 
 async def get_all_events(limit: int = 200, active_only: bool = True) -> list[dict]:
-    """Fetch events from the Polymarket Gamma API.
+    """Fetch events from the Polymarket Gamma API with pagination.
 
-    Each event contains multiple markets (mutually exclusive outcomes).
+    The API returns at most 20 events per request regardless of _limit.
+    We fetch pages concurrently to reach the requested limit quickly.
     """
+    PAGE_SIZE = 20
     url = "https://gamma-api.polymarket.com/events"
-    params: dict = {"_limit": limit}
+
+    base_params: dict = {"_limit": PAGE_SIZE}
     if active_only:
-        params["active"] = "true"
-        params["closed"] = "false"
+        base_params["active"] = "true"
+        base_params["closed"] = "false"
+
+    n_pages = (limit + PAGE_SIZE - 1) // PAGE_SIZE
+
+    async def fetch_page(client: httpx.AsyncClient, offset: int) -> list[dict]:
+        try:
+            resp = await client.get(url, params={**base_params, "_offset": offset})
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as e:
+            log.warning(f"Failed to fetch events at offset {offset}: {e}")
+            return []
 
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.get(url, params=params)
-            resp.raise_for_status()
-            return resp.json()
+            pages = await asyncio.gather(
+                *[fetch_page(client, i * PAGE_SIZE) for i in range(n_pages)]
+            )
+        results: list[dict] = []
+        seen: set[str] = set()
+        for page in pages:
+            for event in page:
+                eid = str(event.get("id", ""))
+                if eid and eid not in seen:
+                    seen.add(eid)
+                    results.append(event)
+        return results[:limit]
     except Exception as e:
         log.error(f"Failed to fetch Polymarket events: {e}")
         return []
