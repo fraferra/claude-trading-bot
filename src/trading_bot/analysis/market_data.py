@@ -271,24 +271,45 @@ async def get_all_events(limit: int = 200, active_only: bool = True) -> list[dic
 
 def parse_event_to_model(raw_event: dict) -> EventData:
     """Convert a raw Gamma API event response to our EventData model."""
+    import json as _json
+
     markets = raw_event.get("markets", [])
     outcomes: list[MarketOutcome] = []
 
     for m in markets:
-        tokens = m.get("tokens", [])
-        yes_price = 0.5
-        no_price = 0.5
-        token_id = ""
-        no_token_id = ""
-        for t in tokens:
-            outcome_str = t.get("outcome", "").lower()
-            price = float(t.get("price", 0.5))
-            if outcome_str == "yes":
-                yes_price = price
-                token_id = t.get("token_id", "")
-            elif outcome_str == "no":
-                no_price = price
-                no_token_id = t.get("token_id", "")
+        # Primary: outcomePrices + clobTokenIds (present in /events endpoint)
+        op_raw = m.get("outcomePrices")
+        tid_raw = m.get("clobTokenIds")
+
+        op = _json.loads(op_raw) if isinstance(op_raw, str) else (op_raw or [])
+        tids = _json.loads(tid_raw) if isinstance(tid_raw, str) else (tid_raw or [])
+
+        if op and len(op) >= 2:
+            try:
+                yes_price = float(op[0])
+                no_price = float(op[1])
+            except (ValueError, TypeError):
+                yes_price, no_price = 0.5, 0.5
+            token_id = str(tids[0]) if len(tids) > 0 else ""
+            no_token_id = str(tids[1]) if len(tids) > 1 else ""
+        else:
+            # Fallback: tokens array (present in /markets endpoint)
+            tokens = m.get("tokens", [])
+            yes_price = 0.5
+            no_price = 0.5
+            token_id = ""
+            no_token_id = ""
+            for t in tokens:
+                outcome_str = t.get("outcome", "").lower()
+                price = float(t.get("price", 0.5))
+                if outcome_str == "yes":
+                    yes_price = price
+                    token_id = t.get("token_id", "")
+                elif outcome_str == "no":
+                    no_price = price
+                    no_token_id = t.get("token_id", "")
+
+        liq = float(m.get("liquidityNum") or m.get("liquidity") or 0)
 
         outcomes.append(MarketOutcome(
             condition_id=m.get("conditionId", m.get("condition_id", "")),
@@ -298,7 +319,7 @@ def parse_event_to_model(raw_event: dict) -> EventData:
             no_price=round(no_price, 4),
             token_id=token_id,
             no_token_id=no_token_id,
-            liquidity=float(m.get("liquidity", 0)),
+            liquidity=liq,
         ))
 
     return EventData(

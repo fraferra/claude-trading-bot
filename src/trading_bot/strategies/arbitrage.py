@@ -100,24 +100,17 @@ class ArbitrageScanner(BaseStrategy):
                 if max_days > 0 and days > max_days:
                     return None
 
-        # Filter out outcomes with zero liquidity
-        valid_outcomes = [o for o in outcomes if o.liquidity > 0 and o.yes_price > 0]
+        # Filter to liquid, priced outcomes only
+        valid_outcomes = [o for o in outcomes if o.liquidity > 0 and o.yes_price > 0.001]
         if len(valid_outcomes) < 2:
-            return None
-
-        # All outcomes must survive filtering; partial MECE sets produce phantom arbs
-        if len(valid_outcomes) != len(outcomes):
-            log.debug(
-                f"Skipping {event.event_id}: {len(outcomes) - len(valid_outcomes)} "
-                f"outcome(s) excluded due to zero liquidity/price"
-            )
             return None
 
         price_sum = sum(o.yes_price for o in valid_outcomes)
 
-        # MECE price_sum should be close to 1.0; >2.0 means corrupt CLOB data
-        if price_sum > 2.0:
-            log.debug(f"Skipping {event.event_id}: price_sum={price_sum:.4f} > 2.0, likely corrupt data")
+        # Sanity bounds: a valid MECE residual set must sum between 0.70 and 1.30.
+        # - sum < 0.70 → outcomes are independent binary markets (not MECE), not tradeable as arb
+        # - sum > 1.30 → corrupt/stale CLOB data
+        if price_sum < 0.70 or price_sum > 1.30:
             return None
 
         raw_edge = abs(1.0 - price_sum)
