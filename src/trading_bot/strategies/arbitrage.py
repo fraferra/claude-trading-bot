@@ -30,14 +30,18 @@ class ArbitrageScanner(BaseStrategy):
 
     name = "multi_outcome_arbitrage"
 
-    def __init__(self, config: Config) -> None:
+    def __init__(self, config: Config, clob_client: object = None) -> None:
         super().__init__(config)
         self.arb_config = config.strategies.arbitrage
+        self.clob_client = clob_client
 
     async def scan(self) -> StrategyResult:
         log.info(f"Scanning up to {self.arb_config.max_events_to_scan} events for arbitrage...")
 
-        raw_events = await get_all_events(limit=self.arb_config.max_events_to_scan)
+        raw_events = await get_all_events(
+            limit=self.arb_config.max_events_to_scan,
+            clob_client=self.clob_client,
+        )
         events = [parse_event_to_model(e) for e in raw_events]
 
         seen_event_ids: set[str] = set()

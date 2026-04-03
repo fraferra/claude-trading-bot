@@ -128,7 +128,8 @@ async def trigger_arb_scan(request: Request, repo: Repository = Depends(get_repo
 
     from trading_bot.strategies.arbitrage import ArbitrageScanner
     config = request.app.state.config
-    scanner = ArbitrageScanner(config)
+    clob_client = getattr(broker, "client", None)
+    scanner = ArbitrageScanner(config, clob_client=clob_client)
     result = await scanner.scan()
 
     return {

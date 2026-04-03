@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json as json_module
 from functools import partial
 
 import httpx
@@ -225,45 +226,167 @@ async def search_polymarket_markets(query: str, limit: int = 10) -> list[dict]:
         return []
 
 
-async def get_all_events(limit: int = 200, active_only: bool = True) -> list[dict]:
-    """Fetch events from the Polymarket Gamma API with pagination.
+def _markets_to_events(markets: list[dict]) -> list[dict]:
+    """Group a flat list of markets into synthetic event dicts by parent event ID."""
+    event_map: dict[str, dict] = {}
+    for m in markets:
+        event_list = m.get("events") or []
+        if not event_list:
+            synthetic_id = f"market_{m.get('id', '')}"
+            event_map[synthetic_id] = {
+                "id": synthetic_id,
+                "title": m.get("question", ""),
+                "slug": m.get("slug", ""),
+                "endDate": m.get("endDate", ""),
+                "markets": [m],
+            }
+            continue
+        for ev in event_list:
+            eid = str(ev.get("id", ""))
+            if not eid:
+                continue
+            if eid not in event_map:
+                event_map[eid] = {
+                    "id": eid,
+                    "title": ev.get("title", ""),
+                    "slug": ev.get("slug", ""),
+                    "endDate": ev.get("endDate", ""),
+                    "markets": [],
+                }
+            event_map[eid]["markets"].append(m)
+    return list(event_map.values())
 
-    The API returns at most 20 events per request regardless of _limit.
-    We fetch pages concurrently to reach the requested limit quickly.
+
+async def _fetch_clob_markets_as_events(clob_client: object, limit: int) -> list[dict]:
+    """Fetch markets via py-clob-client cursor pagination and group into events.
+
+    The CLOB API supports proper cursor-based pagination and returns ALL active
+    markets (thousands), unlike the Gamma /events endpoint which is capped at 20.
     """
-    PAGE_SIZE = 20
-    url = "https://gamma-api.polymarket.com/events"
+    loop = asyncio.get_running_loop()
+    all_markets: list[dict] = []
+    cursor = "MA=="  # base64("0") — start cursor
 
-    base_params: dict = {"_limit": PAGE_SIZE}
+    while len(all_markets) < limit:
+        try:
+            resp = await loop.run_in_executor(
+                None, lambda c=cursor: clob_client.get_markets(next_cursor=c)
+            )
+            if isinstance(resp, dict):
+                data = resp.get("data", [])
+                cursor = resp.get("next_cursor", "LTE=")
+            elif isinstance(resp, list):
+                data = resp
+                cursor = "LTE="  # no more pages
+            else:
+                break
+
+            if not data:
+                break
+
+            # Convert CLOB market format to Gamma-compatible format
+            for m in data:
+                tokens = m.get("tokens", [])
+                outcome_prices = []
+                clob_token_ids = []
+                for t in tokens:
+                    outcome_prices.append(str(t.get("price", "0.5")))
+                    clob_token_ids.append(t.get("token_id", ""))
+                all_markets.append({
+                    "id": m.get("condition_id", m.get("market_slug", "")),
+                    "question": m.get("question", ""),
+                    "conditionId": m.get("condition_id", ""),
+                    "slug": m.get("market_slug", ""),
+                    "endDate": m.get("end_date_iso", ""),
+                    "liquidity": 0,
+                    "liquidityNum": 0,
+                    "outcomePrices": json_module.dumps(outcome_prices),
+                    "clobTokenIds": json_module.dumps(clob_token_ids),
+                    "active": m.get("active", True),
+                    "closed": m.get("closed", False),
+                    "acceptingOrders": m.get("accepting_orders", True),
+                    "events": [],
+                    "groupItemTitle": m.get("question", ""),
+                })
+
+            # LTE= means end of results
+            if cursor in ("LTE=", "", None):
+                break
+
+        except Exception as e:
+            log.warning(f"CLOB market fetch error at cursor {cursor}: {e}")
+            break
+
+    log.info(f"CLOB pagination fetched {len(all_markets)} markets")
+    return _markets_to_events(all_markets[:limit])
+
+
+async def get_all_events(limit: int = 200, active_only: bool = True, clob_client: object = None) -> list[dict]:
+    """Fetch events from Polymarket.
+
+    Tries CLOB API first (full pagination, thousands of markets) when a clob_client
+    is provided. Falls back to Gamma /events (curated ~20 events) otherwise.
+    """
+    # If we have a CLOB client, use it for full market coverage
+    if clob_client is not None:
+        try:
+            return await _fetch_clob_markets_as_events(clob_client, limit)
+        except Exception as e:
+            log.warning(f"CLOB market fetch failed, falling back to Gamma API: {e}")
+
+    # Gamma API fallback — hard-capped at ~20 unique events regardless of params
+    base_params: dict = {"_limit": 20}
     if active_only:
         base_params["active"] = "true"
         base_params["closed"] = "false"
 
-    n_pages = (limit + PAGE_SIZE - 1) // PAGE_SIZE
-
-    async def fetch_page(client: httpx.AsyncClient, offset: int) -> list[dict]:
+    async def fetch_gamma(client: httpx.AsyncClient, url: str, params: dict) -> list[dict]:
         try:
-            resp = await client.get(url, params={**base_params, "_offset": offset})
+            resp = await client.get(url, params=params)
             resp.raise_for_status()
             return resp.json()
         except Exception as e:
-            log.warning(f"Failed to fetch events at offset {offset}: {e}")
+            log.warning(f"Gamma API fetch failed ({url}): {e}")
             return []
+
+    sort_orders = [
+        ("liquidityClob", "desc"),
+        ("volume24hr", "desc"),
+        ("volume1wk", "desc"),
+        ("endDate", "asc"),
+    ]
 
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
-            pages = await asyncio.gather(
-                *[fetch_page(client, i * PAGE_SIZE) for i in range(n_pages)]
+            results = await asyncio.gather(
+                fetch_gamma(client, "https://gamma-api.polymarket.com/events", base_params),
+                *[
+                    fetch_gamma(client, "https://gamma-api.polymarket.com/markets",
+                                {**base_params, "_order": o, "_orderDirection": d})
+                    for o, d in sort_orders
+                ],
             )
-        results: list[dict] = []
+
+        all_events: list[dict] = []
         seen: set[str] = set()
-        for page in pages:
-            for event in page:
+
+        # First result is /events (already event-shaped)
+        for event in results[0]:
+            eid = str(event.get("id", ""))
+            if eid and eid not in seen:
+                seen.add(eid)
+                all_events.append(event)
+
+        # Remaining results are /markets — group into events first
+        for market_list in results[1:]:
+            for event in _markets_to_events(market_list):
                 eid = str(event.get("id", ""))
                 if eid and eid not in seen:
                     seen.add(eid)
-                    results.append(event)
-        return results[:limit]
+                    all_events.append(event)
+
+        log.info(f"Gamma API returned {len(all_events)} unique events (capped at ~20 by API)")
+        return all_events[:limit]
     except Exception as e:
         log.error(f"Failed to fetch Polymarket events: {e}")
         return []

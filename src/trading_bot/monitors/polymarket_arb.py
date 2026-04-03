@@ -102,8 +102,9 @@ class PolymarketArbMonitor(BaseMonitor):
         # 1. Settlement check before scanning for new trades
         await self._check_settlements(broker)
 
-        # 2. Scan for opportunities
-        scanner = ArbitrageScanner(self.config)
+        # 2. Scan for opportunities — pass CLOB client for full market coverage
+        clob_client = getattr(broker, "client", None)
+        scanner = ArbitrageScanner(self.config, clob_client=clob_client)
         result = await scanner.scan()
 
         opportunity_groups = result.metadata.get("opportunities", [])
