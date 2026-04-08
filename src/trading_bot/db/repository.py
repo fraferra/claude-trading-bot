@@ -887,11 +887,19 @@ class Repository:
         return [dict(r) for r in rows]
 
     async def get_unsettled_polymarket_trades(self) -> list[dict]:
-        """Get all Polymarket trades that haven't been settled yet."""
+        """Get all Polymarket trades that haven't been settled yet.
+
+        Includes both 'filled' and 'pending' statuses because the Polymarket
+        CLOB API typically returns no status field on order submission, causing
+        trades to be recorded as 'pending' even though a filled_price is stored.
+        At market resolution time, the CLOB position exists regardless of the
+        recorded order status.
+        """
         cursor = await self._db.db.execute(
             """SELECT t.* FROM trades t
                WHERE t.platform = 'polymarket'
-               AND t.status = 'filled'
+               AND t.status IN ('filled', 'pending')
+               AND t.filled_price IS NOT NULL
                AND t.id NOT IN (SELECT trade_id FROM polymarket_settlements)
                ORDER BY t.created_at ASC"""
         )
